@@ -1,0 +1,2 @@
+"""FIT AI backend package."""
+

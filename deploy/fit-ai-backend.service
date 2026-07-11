@@ -1,0 +1,24 @@
+[Unit]
+Description=FIT AI FastAPI backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fitai
+Group=fitai
+WorkingDirectory=/opt/fit-ai
+EnvironmentFile=/opt/fit-ai/.env
+ExecStart=/opt/fit-ai/.venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/fit-ai/data
+
+[Install]
+WantedBy=multi-user.target
