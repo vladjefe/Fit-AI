@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -28,6 +29,7 @@ from backend.app.config import Settings, get_settings
 from backend.app.db import SessionFactory
 from backend.app.models import Role, User
 from backend.app.schemas import BodyWeightInput, NutritionInput, TrainerFeedbackInput
+from backend.app.security import issue_pairing_code
 from bot.scheduler import build_scheduler
 
 
@@ -592,6 +594,24 @@ async def receive_trainer_comment(message: Message, state: FSMContext) -> None:
     await message.answer("Комментарий отправлен владельцу")
 
 
+@router.message(Command("app"))
+async def pair_android_app(message: Message) -> None:
+    actor = await actor_from_message(message)
+    if actor is None:
+        return
+    async with SessionFactory() as db:
+        code, expires_at = await issue_pairing_code(db, message.from_user.id)
+    minutes = max(1, round((expires_at - datetime.now(timezone.utc)).total_seconds() / 60))
+    await message.answer(
+        "📱 Код для входа в приложение FIT AI:\n\n"
+        f"<code>{code}</code>\n\n"
+        f"Введи его в приложении в течение {minutes} мин.\n"
+        "Код одноразовый, прошлые коды больше не работают. "
+        "Никому не пересылай — он даёт полный доступ к твоим данным.",
+        parse_mode="HTML",
+    )
+
+
 @router.message()
 async def fallback(message: Message) -> None:
     await actor_from_message(message)
@@ -612,6 +632,7 @@ async def main() -> None:
     await bot.set_my_commands(
         [
             BotCommand(command="start", description="Открыть FIT AI"),
+            BotCommand(command="app", description="Код для входа в приложение"),
         ]
     )
     dispatcher = Dispatcher()

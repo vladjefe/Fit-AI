@@ -1,20 +1,32 @@
 import {
   Bell,
   Clock3,
+  CloudOff,
   Dumbbell,
   HelpCircle,
   Languages,
   LockKeyhole,
+  LogOut,
   Moon,
   ShieldCheck,
   SlidersHorizontal,
   Target,
+  Timer,
   UserRound,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Card } from "../components/Card";
 import { api } from "../services/api";
+import { forgetToken } from "../services/auth";
+import { subscribePending, syncPending } from "../services/offlineQueue";
+import {
+  DEFAULT_REST_SECONDS,
+  formatRest,
+  loadRestDuration,
+  REST_PRESETS,
+  saveRestDuration,
+} from "../services/restTimer";
 import type { AppTab } from "../types";
 import type { ReminderData } from "../types";
 
@@ -31,6 +43,25 @@ export function ProfileScreen({
   const [loadingReminders, setLoadingReminders] = useState(true);
   const [savingReminders, setSavingReminders] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [restSeconds, setRestSeconds] = useState(DEFAULT_REST_SECONDS);
+  const [pending, setPending] = useState(0);
+
+  useEffect(() => {
+    void loadRestDuration().then(setRestSeconds);
+    return subscribePending(setPending);
+  }, []);
+
+  function cycleRestDuration() {
+    const next = REST_PRESETS[(REST_PRESETS.indexOf(restSeconds as never) + 1) % REST_PRESETS.length];
+    setRestSeconds(next);
+    void saveRestDuration(next);
+    onToast(`Отдых между подходами: ${formatRest(next)}`);
+  }
+
+  async function unpairDevice() {
+    await forgetToken();
+    window.location.reload();
+  }
 
   useEffect(() => {
     let active = true;
@@ -102,6 +133,12 @@ export function ProfileScreen({
       <SettingsGroup title="Тренировки">
         <SettingsRow icon={Dumbbell} title="Тренер" value="Не подключен" onClick={() => onToast("Тренера пока нет в настройках")} />
         <SettingsRow
+          icon={Timer}
+          title="Отдых между подходами"
+          value={formatRest(restSeconds)}
+          onClick={cycleRestDuration}
+        />
+        <SettingsRow
           icon={Clock3}
           title="Напоминания"
           value={loadingReminders ? "Загрузка…" : remindersEnabled ? reminderTime : "Выключены"}
@@ -119,8 +156,23 @@ export function ProfileScreen({
 
       <SettingsGroup title="Безопасность">
         <SettingsRow icon={LockKeyhole} title="Данные и приватность" value="Открыть" onClick={() => onToast("Фото и AI доступны только владельцу")} />
-        <SettingsRow icon={ShieldCheck} title="Активные сессии" value="Telegram" onClick={() => onToast("Авторизация идёт через Telegram Mini App")} />
+        <SettingsRow
+          icon={CloudOff}
+          title="Не отправлено"
+          value={pending > 0 ? `${pending} записей` : "Всё синхронизировано"}
+          onClick={() =>
+            void syncPending().then((result) =>
+              onToast(result.sent > 0 ? `Отправлено: ${result.sent}` : "Нечего отправлять"),
+            )
+          }
+        />
         <SettingsRow icon={HelpCircle} title="Помощь" value="/start" onClick={() => onToast("Открой бота и нажми /start")} />
+        <SettingsRow
+          icon={LogOut}
+          title="Отвязать устройство"
+          value="Выйти"
+          onClick={() => void unpairDevice()}
+        />
       </SettingsGroup>
 
       <div className="px-4 pb-2 text-center">

@@ -1,0 +1,119 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      demo:
+        description: "Демо-сборка на моках: работает без бэкенда и без кода привязки"
+        required: false
+        default: false
+        type: boolean
+      api_url:
+        description: "Адрес backend API (перекрывает переменную VITE_API_URL)"
+        required: false
+        type: string
+  push:
+    branches:
+      - android-app
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    # Пуш в ветку android-app собирает демо, релизный APK — только по тегу или вручную.
+    env:
+      DEMO: ${{ inputs.demo || github.ref == 'refs/heads/android-app' }}
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web bundle
+        env:
+          # Секретом не является — это публичный адрес API, но держим его вне репозитория.
+          API_URL: ${{ inputs.api_url || vars.VITE_API_URL }}
+        run: |
+          if [ "$DEMO" = "true" ]; then
+            echo "Демо-сборка: моки включены, backend не нужен"
+            export VITE_USE_MOCKS=true
+            export VITE_API_URL="http://localhost/api/v1"
+          else
+            if [ -z "$API_URL" ]; then
+              echo "::error::Задай переменную репозитория VITE_API_URL (Settings → Secrets and variables → Actions → Variables) или включи демо-сборку"
+              exit 1
+            fi
+            export VITE_USE_MOCKS=false
+            export VITE_API_URL="$API_URL"
+          fi
+          pnpm build
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Assemble debug APK
+        working-directory: frontend/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Name the APK
+        id: apk
+        run: |
+          if [ "$DEMO" = "true" ]; then NAME="fit-ai-demo.apk"; else NAME="fit-ai.apk"; fi
+          cp android/app/build/outputs/apk/debug/app-debug.apk "$NAME"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "size=$(du -h "$NAME" | cut -f1)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fit-ai-apk
+          path: frontend/${{ steps.apk.outputs.name }}
+          if-no-files-found: error
+          retention-days: 30
+
+      # Релиз даёт прямую ссылку на .apk — с телефона качается без входа в GitHub.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$DEMO" = "true" ]; then
+            TAG="demo"
+            TITLE="FIT AI — демо-сборка"
+            NOTES="Обзорная сборка на демо-данных: работает без бэкенда и без кода привязки. Размер ${{ steps.apk.outputs.size }}. Собрано из ${GITHUB_SHA:0:7}."
+            PRERELEASE="--prerelease"
+          else
+            TAG="${GITHUB_REF_NAME}"
+            TITLE="FIT AI ${GITHUB_REF_NAME}"
+            NOTES="Сборка из ${GITHUB_SHA:0:7}."
+            PRERELEASE=""
+          fi
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" "${{ steps.apk.outputs.name }}" \
+            --title "$TITLE" --notes "$NOTES" --target "$GITHUB_SHA" $PRERELEASE
+          echo "Скачать: $(gh release view "$TAG" --json assets --jq '.assets[0].url')"

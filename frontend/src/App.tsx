@@ -1,12 +1,19 @@
+import { App as CapacitorApp } from "@capacitor/app";
+import { SplashScreen } from "@capacitor/splash-screen";
+import { StatusBar, Style } from "@capacitor/status-bar";
 import { AnimatePresence } from "framer-motion";
-import { Check, WifiOff } from "lucide-react";
+import { Check, CloudOff, WifiOff } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { BottomNav } from "./components/BottomNav";
 import { Page } from "./components/Page";
-import { mockDashboard } from "./data/mockData";
 import { useTelegram } from "./hooks/useTelegram";
 import { HomeScreen } from "./screens/HomeScreen";
-import { api } from "./services/api";
+import { PairingScreen } from "./screens/PairingScreen";
+import { api, NotPairedError } from "./services/api";
+import { loadToken } from "./services/auth";
+import { ensureNotificationPermission, isNative } from "./services/native";
+import { startAutoSync, subscribePending, syncPending } from "./services/offlineQueue";
+import { scheduleReminderNotifications } from "./services/reminders";
 import type { AppTab, DashboardData } from "./types";
 
 const WorkoutScreen = lazy(() =>
@@ -22,13 +29,17 @@ const ProfileScreen = lazy(() =>
   import("./screens/ProfileScreen").then((module) => ({ default: module.ProfileScreen })),
 );
 
+type AuthState = "checking" | "unpaired" | "ready";
+
 export default function App() {
   const { user, haptic } = useTelegram();
+  const [auth, setAuth] = useState<AuthState>("checking");
   const [activeTab, setActiveTab] = useState<AppTab>("home");
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [workoutLocked, setWorkoutLocked] = useState(false);
+  const [pendingSync, setPendingSync] = useState(0);
 
   async function refreshDashboard(active = true) {
     const data = await api.dashboard();
@@ -39,17 +50,82 @@ export default function App() {
     });
   }
 
+  // Нативная оболочка: тёмный статус-бар и скрытие splash после первой отрисовки.
+  useEffect(() => {
+    if (!isNative) return;
+    void StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+    void StatusBar.setBackgroundColor({ color: "#090b0a" }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (auth === "checking") return;
+    void SplashScreen.hide().catch(() => {});
+  }, [auth]);
+
   useEffect(() => {
     let active = true;
-    refreshDashboard(active)
-      .catch((reason: unknown) => {
-        if (!active) return;
-        setError(reason instanceof Error ? reason.message : "Не удалось загрузить данные");
-      });
+    void loadToken().then((token) => {
+      if (!active) return;
+      const hasTelegram = Boolean(window.Telegram?.WebApp?.initData);
+      setAuth(token || hasTelegram || api.isMock ? "ready" : "unpaired");
+    });
     return () => {
       active = false;
     };
-  }, [user?.first_name]);
+  }, []);
+
+  useEffect(() => {
+    if (auth !== "ready") return;
+    let active = true;
+    refreshDashboard(active).catch((reason: unknown) => {
+      if (!active) return;
+      if (reason instanceof NotPairedError) {
+        setAuth("unpaired");
+        return;
+      }
+      setError(reason instanceof Error ? reason.message : "Не удалось загрузить данные");
+    });
+    return () => {
+      active = false;
+    };
+  }, [auth, user?.first_name]);
+
+  // Догоняем оффлайн-очередь и переносим напоминания в системные уведомления.
+  useEffect(() => {
+    if (auth !== "ready") return;
+    const unsubscribe = subscribePending(setPendingSync);
+    const stopAutoSync = startAutoSync();
+    if (!isNative) return () => {
+      unsubscribe();
+      stopAutoSync();
+    };
+
+    void ensureNotificationPermission().then(() => scheduleReminderNotifications());
+    const listener = CapacitorApp.addListener("resume", () => {
+      void syncPending().then((result) => {
+        if (result.sent > 0) void refreshDashboard();
+      });
+    });
+    return () => {
+      unsubscribe();
+      stopAutoSync();
+      void listener.then((item) => item.remove());
+    };
+  }, [auth]);
+
+  // Аппаратная кнопка «Назад»: с вкладки уводит на главную, с главной сворачивает.
+  useEffect(() => {
+    if (!isNative) return;
+    const listener = CapacitorApp.addListener("backButton", () => {
+      if (workoutLocked) return;
+      if (activeTab !== "home") {
+        setActiveTab("home");
+        return;
+      }
+      void CapacitorApp.minimizeApp();
+    });
+    return () => void listener.then((item) => item.remove());
+  }, [activeTab, workoutLocked]);
 
   function navigate(tab: AppTab) {
     haptic.select();
@@ -61,6 +137,21 @@ export default function App() {
     haptic.success();
     setToast(message);
     window.setTimeout(() => setToast(null), 2400);
+  }
+
+  if (auth === "checking") {
+    return <LoadingScreen />;
+  }
+
+  if (auth === "unpaired") {
+    return (
+      <PairingScreen
+        onPaired={() => {
+          setError(null);
+          setAuth("ready");
+        }}
+      />
+    );
   }
 
   if (error) {
@@ -109,6 +200,14 @@ export default function App() {
             </Suspense>
           </Page>
         </AnimatePresence>
+
+        {pendingSync > 0 && (
+          <div className="pointer-events-none fixed inset-x-0 top-0 z-[60] mx-auto flex max-w-[520px] justify-center px-4 pt-[max(8px,env(safe-area-inset-top))]">
+            <span className="flex items-center gap-1.5 rounded-full border border-orange-300/20 bg-[#241d10]/95 px-3 py-1.5 text-[10px] font-extrabold text-orange-200 backdrop-blur-xl">
+              <CloudOff size={12} /> Ждут отправки: {pendingSync}
+            </span>
+          </div>
+        )}
 
         {!workoutLocked && <BottomNav active={activeTab} onChange={navigate} />}
 

@@ -14,7 +14,7 @@ dist/
 .pnpm-store/
 *.log
 *.tsbuildinfo
-data/
+/data/
 *.db
 *.db-*
 deploy.py
@@ -22,3 +22,17 @@ deploy/update_vps.py
 _check_vps.py
 _fix_firewall.py
 *.zip
+
+# Android (Capacitor): исходники платформы коммитим, сборку — нет
+frontend/android/.gradle/
+frontend/android/build/
+frontend/android/app/build/
+frontend/android/captures/
+frontend/android/local.properties
+frontend/android/app/src/main/assets/public/
+frontend/android/app/src/main/assets/capacitor.config.json
+frontend/android/app/src/main/assets/capacitor.plugins.json
+*.apk
+*.aab
+*.keystore
+*.jks

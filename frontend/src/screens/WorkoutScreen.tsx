@@ -15,11 +15,18 @@ import {
   Trophy,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { ExerciseImage } from "../components/ExerciseImage";
-import { api } from "../services/api";
+import { RestTimer } from "../components/RestTimer";
+import { api, isQueued } from "../services/api";
+import {
+  armRestNotification,
+  cancelRestNotification,
+  DEFAULT_REST_SECONDS,
+  loadRestDuration,
+} from "../services/restTimer";
 import type { DashboardData, Exercise, SavedSet, WorkoutPlan } from "../types";
 
 type Stage = "overview" | "active" | "exercise-result" | "complete";
@@ -59,8 +66,28 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
   const [completedWorkoutName, setCompletedWorkoutName] = useState<string | null>(null);
   const [selectedExerciseInfo, setSelectedExerciseInfo] = useState<Exercise | null>(null);
+  const [restSeconds, setRestSeconds] = useState(DEFAULT_REST_SECONDS);
+  const [restEndsAt, setRestEndsAt] = useState<number | null>(null);
+  const [queuedCount, setQueuedCount] = useState(0);
   const saveLock = useRef(false);
   const exercise = (exercises[exerciseIndex] ?? exercises[0])!;
+
+  useEffect(() => {
+    void loadRestDuration().then(setRestSeconds);
+  }, []);
+
+  const startRest = useCallback(
+    (seconds: number, name: string) => {
+      setRestEndsAt(Date.now() + seconds * 1000);
+      void armRestNotification(seconds, name);
+    },
+    [],
+  );
+
+  const stopRest = useCallback(() => {
+    setRestEndsAt(null);
+    void cancelRestNotification();
+  }, []);
 
   useEffect(() => {
     if (data.activeSessionStartedAt && !startedAt) {
@@ -182,7 +209,8 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
     };
     try {
       if (!api.isMock && sessionId) {
-        await api.saveSet(sessionId, saved);
+        const result = await api.saveSet(sessionId, saved);
+        setQueuedCount((current) => (isQueued(result) ? current + 1 : current));
       }
       setSets((current) => [
         ...current.filter(
@@ -194,7 +222,9 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
       if (setNumber < exercise.targetSets) {
         setSetNumber((current) => current + 1);
         setReps(Math.min(exercise.repMax, reps));
+        startRest(restSeconds, exercise.name);
       } else {
+        stopRest();
         setStage("exercise-result");
       }
     } catch (reason) {
@@ -207,6 +237,7 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
 
   function nextExercise() {
     haptic.tap();
+    stopRest();
     if (exerciseIndex === exercises.length - 1) {
       setShowFinishConfirm(true);
       return;
@@ -244,6 +275,8 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
   }
 
   function restart() {
+    stopRest();
+    setQueuedCount(0);
     setExerciseIndex(0);
     setSetNumber(1);
     setReps(exercises[0]?.repMax ?? 12);
@@ -530,6 +563,28 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
           </motion.div>
         )}
       </AnimatePresence>
+
+      {queuedCount > 0 && (
+        <p className="mt-4 rounded-2xl border border-orange-300/20 bg-orange-300/[0.08] px-4 py-3 text-center text-[11px] font-semibold text-orange-200">
+          Нет сети — {queuedCount} подх. сохранены на телефоне и уйдут на сервер автоматически
+        </p>
+      )}
+
+      <RestTimer
+        endsAt={restEndsAt}
+        duration={restSeconds}
+        exerciseName={exercise.name}
+        onDurationChange={(seconds) => {
+          setRestSeconds(seconds);
+          if (restEndsAt) startRest(seconds, exercise.name);
+        }}
+        onExtend={(seconds) => {
+          const base = Math.max(Date.now(), restEndsAt ?? Date.now());
+          const left = Math.round((base - Date.now()) / 1000) + seconds;
+          startRest(left, exercise.name);
+        }}
+        onDismiss={stopRest}
+      />
 
       <AnimatePresence>
         {selectedExerciseInfo && (

@@ -44,6 +44,7 @@ class Settings:
     api_host: str
     api_port: int
     telegram_init_data_ttl_seconds: int
+    cors_allow_origins: tuple[str, ...]
 
     @property
     def allowed_telegram_ids(self) -> frozenset[int]:
@@ -73,4 +74,22 @@ def get_settings() -> Settings:
         telegram_init_data_ttl_seconds=int(
             os.getenv("TELEGRAM_INIT_DATA_TTL_SECONDS", "86400")
         ),
+        cors_allow_origins=_origins(),
     )
+
+
+def _origins() -> tuple[str, ...]:
+    """Android WebView в Capacitor ходит с origin https://localhost, а не с домена API."""
+    defaults = (
+        "https://localhost",
+        "http://localhost",
+        "capacitor://localhost",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    )
+    extra = tuple(
+        origin.strip()
+        for origin in os.getenv("CORS_ALLOW_ORIGINS", "").split(",")
+        if origin.strip()
+    )
+    return defaults + extra

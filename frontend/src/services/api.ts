@@ -1,4 +1,6 @@
-import { mockDashboard } from "../data/mockData";
+import { currentToken } from "./auth";
+import { enqueue } from "./offlineQueue";
+import { mockDashboard, mockGoals, mockProgress, mockReminders } from "../data/mockData";
 import type {
   DashboardData,
   GoalData,
@@ -15,40 +17,88 @@ const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== "false";
 
 type ApiOptions = RequestInit & { body?: BodyInit | null };
 
-async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
-  const initData = window.Telegram?.WebApp.initData ?? "";
-  if (!USE_MOCKS && !initData) {
-    throw new Error(
-      "Открой FIT AI через Telegram Mini App. В обычном браузере Telegram не передаёт авторизацию, поэтому запись данных заблокирована.",
-    );
+/** Устройство не привязано или токен отозван — App покажет экран привязки. */
+export class NotPairedError extends Error {
+  constructor(message = "Устройство не привязано") {
+    super(message);
+    this.name = "NotPairedError";
   }
+}
+
+function authHeaders(): Record<string, string> {
+  const token = currentToken();
+  const initData = window.Telegram?.WebApp?.initData ?? "";
+  if (token) return { Authorization: `Bearer ${token}` };
+  if (initData) return { "X-Telegram-Init-Data": initData };
+  return {};
+}
+
+function ensureAuthenticated(): void {
+  if (USE_MOCKS) return;
+  const headers = authHeaders();
+  if (!headers.Authorization && !headers["X-Telegram-Init-Data"]) {
+    throw new NotPairedError();
+  }
+}
+
+async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
+  ensureAuthenticated();
   const isFormData = options.body instanceof FormData;
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
       ...(isFormData ? {} : { "Content-Type": "application/json" }),
-      "X-Telegram-Init-Data": initData,
+      ...authHeaders(),
       ...options.headers,
     },
   });
 
   if (!response.ok) {
     const error = (await response.json().catch(() => null)) as { detail?: string } | null;
+    if (response.status === 403) {
+      throw new NotPairedError(error?.detail ?? "Доступ запрещён");
+    }
     throw new Error(error?.detail ?? `Ошибка API: ${response.status}`);
   }
   return response.json() as Promise<T>;
 }
 
 async function requestBlob(path: string): Promise<Blob> {
-  const initData = window.Telegram?.WebApp.initData ?? "";
-  if (!USE_MOCKS && !initData) {
-    throw new Error("Открой FIT AI через Telegram Mini App");
-  }
-  const response = await fetch(`${API_URL}${path}`, {
-    headers: { "X-Telegram-Init-Data": initData },
-  });
+  ensureAuthenticated();
+  const response = await fetch(`${API_URL}${path}`, { headers: authHeaders() });
   if (!response.ok) throw new Error(`Ошибка загрузки фото: ${response.status}`);
   return response.blob();
+}
+
+export interface QueuedResult {
+  queued: true;
+}
+
+export function isQueued(value: unknown): value is QueuedResult {
+  return typeof value === "object" && value !== null && "queued" in value;
+}
+
+/**
+ * Запись, которую не страшно проиграть повторно. Если сети нет — уходит в
+ * локальную очередь, а не теряется и не показывает пользователю ошибку.
+ */
+async function mutate<T>(
+  path: string,
+  method: string,
+  body: unknown,
+  label: string,
+): Promise<T | QueuedResult> {
+  ensureAuthenticated();
+  try {
+    return await request<T>(path, { method, body: JSON.stringify(body) });
+  } catch (reason) {
+    // fetch бросает TypeError только когда запрос не ушёл в сеть.
+    if (reason instanceof TypeError) {
+      await enqueue(path, method, body, label);
+      return { queued: true };
+    }
+    throw reason;
+  }
 }
 
 export const api = {
@@ -90,23 +140,29 @@ export const api = {
           body: JSON.stringify(templateId ? { template_id: templateId } : {}),
         }),
   saveSet: (sessionId: number, set: SavedSet) =>
-    request(`/workouts/${sessionId}/sets`, {
-      method: "PUT",
-      body: JSON.stringify({
+    mutate(
+      `/workouts/${sessionId}/sets`,
+      "PUT",
+      {
         exercise_template_id: set.exerciseId,
         set_number: set.setNumber,
         weight_kg: set.weightKg,
         reps: set.reps,
         is_completed: true,
-      }),
-    }),
+      },
+      `Подход ${set.setNumber}`,
+    ),
   completeWorkout: (sessionId: number) =>
-    request(`/workouts/${sessionId}/complete`, {
+    USE_MOCKS
+      ? Promise.resolve({ session_id: sessionId, completed: true })
+      : request(`/workouts/${sessionId}/complete`, {
       method: "POST",
       body: JSON.stringify({ perceived_exertion: 8 }),
     }),
   cancelWorkout: (sessionId: number) =>
-    request(`/workouts/${sessionId}/cancel`, {
+    USE_MOCKS
+      ? Promise.resolve({ session_id: sessionId, cancelled: true })
+      : request(`/workouts/${sessionId}/cancel`, {
       method: "POST",
       body: JSON.stringify({}),
     }),
@@ -123,25 +179,29 @@ export const api = {
   addWeight: (weightKg: number) =>
     USE_MOCKS
       ? Promise.resolve({ weight_kg: weightKg })
-      : request("/body-weight", { method: "POST", body: JSON.stringify({ weight_kg: weightKg }) }),
+      : mutate("/body-weight", "POST", { weight_kg: weightKg }, "Вес"),
   addNutrition: (calories: number, proteinG: number) =>
     USE_MOCKS
       ? Promise.resolve({ calories, protein_g: proteinG })
-      : request("/nutrition", {
-          method: "POST",
-          body: JSON.stringify({ log_date: localDateString(), calories, protein_g: proteinG }),
-        }),
+      : mutate(
+          "/nutrition",
+          "POST",
+          { log_date: localDateString(), calories, protein_g: proteinG },
+          "Питание",
+        ),
   addCardio: (distanceKm: number, durationSeconds: number) =>
     USE_MOCKS
       ? Promise.resolve({ distance_km: distanceKm, duration_seconds: durationSeconds })
-      : request("/cardio", {
-          method: "POST",
-          body: JSON.stringify({
+      : mutate(
+          "/cardio",
+          "POST",
+          {
             activity_type: "run",
             distance_km: distanceKm,
             duration_seconds: durationSeconds,
-          }),
-        }),
+          },
+          "Кардио",
+        ),
   weeklyAnalysis: () =>
     USE_MOCKS
       ? Promise.resolve({
@@ -153,35 +213,12 @@ export const api = {
           body: JSON.stringify({}),
         }),
   progress: async (weeks = 8): Promise<ProgressData> => {
-    if (USE_MOCKS) {
-      return {
-        periodWeeks: weeks,
-        workoutsCompleted: 0,
-        totalVolumeKg: 0,
-        weightStats: {
-          firstKg: null,
-          latestKg: null,
-          changeKg: null,
-          entries: 0,
-          minKg: null,
-          maxKg: null,
-        },
-        nutritionStats: {
-          loggedDays: 0,
-          averageCalories: null,
-          averageProteinG: null,
-        },
-        workouts: [],
-        bodyWeight: [],
-        nutrition: [],
-        cardio: [],
-      };
-    }
+    if (USE_MOCKS) return { ...mockProgress, periodWeeks: weeks };
     const raw = await request<Record<string, unknown>>(`/progress?weeks=${weeks}`);
     return mapProgress(raw);
   },
   goals: async (): Promise<GoalData[]> => {
-    if (USE_MOCKS) return [];
+    if (USE_MOCKS) return mockGoals;
     const raw = await request<Array<Record<string, unknown>>>("/goals");
     return raw.map(mapGoal);
   },
@@ -189,6 +226,12 @@ export const api = {
     goalId: number,
     payload: { currentValue?: number | null; targetValue?: number | null },
   ): Promise<GoalData> => {
+    if (USE_MOCKS) {
+      const goal = mockGoals.find((item) => item.id === goalId) ?? mockGoals[0];
+      if (payload.currentValue !== undefined) goal.currentValue = payload.currentValue;
+      if (payload.targetValue !== undefined) goal.targetValue = payload.targetValue;
+      return { ...goal };
+    }
     const raw = await request<Record<string, unknown>>(`/goals/${goalId}`, {
       method: "PUT",
       body: JSON.stringify({
@@ -204,6 +247,19 @@ export const api = {
     targetValue?: number | null;
     unit?: string | null;
   }): Promise<GoalData> => {
+    if (USE_MOCKS) {
+      const goal: GoalData = {
+        id: Math.max(0, ...mockGoals.map((item) => item.id)) + 1,
+        type: "custom",
+        title: payload.title,
+        currentValue: payload.currentValue ?? null,
+        targetValue: payload.targetValue ?? null,
+        unit: payload.unit || null,
+        targetDate: null,
+      };
+      mockGoals.push(goal);
+      return { ...goal };
+    }
     const raw = await request<Record<string, unknown>>("/goals", {
       method: "POST",
       body: JSON.stringify({
@@ -217,7 +273,7 @@ export const api = {
     return mapGoal(raw);
   },
   reminders: async (): Promise<ReminderData[]> => {
-    if (USE_MOCKS) return [];
+    if (USE_MOCKS) return mockReminders;
     const raw = await request<Array<Record<string, unknown>>>("/reminders");
     return raw.map(mapReminder);
   },
@@ -225,6 +281,12 @@ export const api = {
     reminderId: number,
     payload: { isActive?: boolean; localTime?: string },
   ): Promise<ReminderData> => {
+    if (USE_MOCKS) {
+      const reminder = mockReminders.find((item) => item.id === reminderId) ?? mockReminders[0];
+      if (payload.isActive !== undefined) reminder.isActive = payload.isActive;
+      if (payload.localTime) reminder.localTime = payload.localTime;
+      return { ...reminder };
+    }
     const raw = await request<Record<string, unknown>>(`/reminders/${reminderId}`, {
       method: "PUT",
       body: JSON.stringify({

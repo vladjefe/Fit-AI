@@ -4,14 +4,48 @@
 
 ## Авторизация
 
-Все приватные запросы Mini App передают:
+Поддерживаются два способа, backend принимает любой из них.
+
+**Токен устройства (Android APK):**
+
+```http
+Authorization: Bearer <device_token>
+Content-Type: application/json
+```
+
+**Telegram initData (Mini App):**
 
 ```http
 X-Telegram-Init-Data: query_id=...&user=...&auth_date=...&hash=...
 Content-Type: application/json
 ```
 
-Значение — исходная строка `Telegram.WebApp.initData`, без разбора и повторного кодирования на frontend. Backend проверяет подпись токеном бота, TTL и ID из `.env`.
+Значение — исходная строка `Telegram.WebApp.initData`, без разбора и повторного кодирования на frontend. Backend проверяет подпись токеном бота, TTL и ID из `.env`. Если пришли оба заголовка, приоритет у `Authorization`.
+
+Токены хранятся только как SHA-256 хеши, отозванный токен даёт `403`.
+
+## Привязка устройства
+
+| Метод | Путь | Доступ | Назначение |
+|---|---|---|---|
+| POST | `/auth/pair` | без авторизации | обменять одноразовый код из бота на токен устройства |
+| GET | `/auth/me` | владелец/тренер | роль и имя текущего пользователя |
+| POST | `/auth/logout` | владелец/тренер | отозвать токен текущего устройства |
+
+Код выдаёт бот по команде `/app`: 8 символов из алфавита без похожих знаков, TTL 10 минут, одноразовый. Новый код гасит все предыдущие неиспользованные коды того же Telegram ID.
+
+```http
+POST /api/v1/auth/pair
+Content-Type: application/json
+
+{"code": "JAPX-2DBG", "device_name": "Pixel 8"}
+```
+
+```json
+{"token": "mpBfuhv28gcjQqrcpA6X...", "role": "owner", "display_name": "Owner"}
+```
+
+Дефисы и регистр в коде не важны. Неверный, просроченный или уже использованный код — `400 Код неверный или уже истёк`. Telegram ID вне allowlist — `403`.
 
 ## Endpoints владельца
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,7 @@ from backend.app.schemas import (
     BodyWeightInput,
     CardioInput,
     CompleteWorkoutInput,
+    DevicePairInput,
     ExerciseSetInput,
     GoalCreateInput,
     GoalUpdateInput,
@@ -27,7 +28,13 @@ from backend.app.schemas import (
     WellbeingInput,
     WeeklyAIInput,
 )
-from backend.app.security import require_owner, require_trainer
+from backend.app.security import (
+    get_current_user,
+    redeem_pairing_code,
+    require_owner,
+    require_trainer,
+    revoke_device_token,
+)
 from backend.app import services
 
 
@@ -57,6 +64,36 @@ async def _notify_owner_feedback(text: str) -> None:
             await bot.send_message(settings.owner_telegram_id, text)
     except Exception:
         logger.exception("Trainer feedback notification failed")
+
+
+@router.post("/auth/pair", tags=["auth"])
+async def pair_device(
+    payload: DevicePairInput,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    """Обменивает одноразовый код из бота на постоянный токен устройства."""
+    token, user = await redeem_pairing_code(db, settings, payload.code, payload.device_name)
+    return {
+        "token": token,
+        "role": user.role.value,
+        "display_name": user.display_name,
+    }
+
+
+@router.get("/auth/me", tags=["auth"])
+async def get_auth_me(user: User = Depends(get_current_user)):
+    return {"role": user.role.value, "display_name": user.display_name}
+
+
+@router.post("/auth/logout", tags=["auth"])
+async def logout_device(
+    authorization: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return {"revoked": False}
+    return {"revoked": await revoke_device_token(db, authorization[7:].strip())}
 
 
 @router.get("/dashboard", tags=["owner"])

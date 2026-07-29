@@ -103,5 +103,10 @@ class ReminderUpdateInput(BaseModel):
     timezone: str | None = Field(default=None, min_length=1, max_length=64)
 
 
+class DevicePairInput(BaseModel):
+    code: str = Field(min_length=4, max_length=32)
+    device_name: str | None = Field(default=None, max_length=100)
+
+
 class HealthResponse(BaseModel):
     status: str
