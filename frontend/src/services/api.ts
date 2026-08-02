@@ -1,7 +1,17 @@
 import { currentToken } from "./auth";
 import { enqueue } from "./offlineQueue";
-import { mockDashboard, mockGoals, mockProgress, mockReminders } from "../data/mockData";
+import { mockCatalog } from "../data/exerciseCatalog";
+import {
+  mockDashboard,
+  mockDeleteTemplate,
+  mockGoals,
+  mockProgress,
+  mockReminders,
+  mockSaveTemplate,
+} from "../data/mockData";
 import type {
+  BuilderExercise,
+  CatalogExercise,
   DashboardData,
   GoalData,
   ProgressData,
@@ -212,6 +222,74 @@ export const api = {
           method: "POST",
           body: JSON.stringify({}),
         }),
+  exerciseCatalog: async (
+    query?: string,
+    muscleGroup?: string,
+  ): Promise<CatalogExercise[]> => {
+    if (USE_MOCKS) return filterCatalog(mockCatalog, query, muscleGroup);
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    if (muscleGroup) params.set("muscle_group", muscleGroup);
+    const suffix = params.toString() ? `?${params}` : "";
+    const raw = await request<Array<Record<string, unknown>>>(`/exercises${suffix}`);
+    return raw.map(mapCatalogExercise);
+  },
+  createCustomExercise: async (payload: {
+    name: string;
+    muscleGroup: string;
+    equipment: string;
+  }): Promise<CatalogExercise> => {
+    if (USE_MOCKS) {
+      const created: CatalogExercise = {
+        id: Math.max(0, ...mockCatalog.map((item) => item.id)) + 1,
+        name: payload.name,
+        muscleGroup: payload.muscleGroup,
+        equipment: payload.equipment,
+        imageKey: null,
+        isCustom: true,
+      };
+      mockCatalog.push(created);
+      return created;
+    }
+    const raw = await request<Record<string, unknown>>("/exercises", {
+      method: "POST",
+      body: JSON.stringify({
+        name: payload.name,
+        muscle_group: payload.muscleGroup,
+        equipment: payload.equipment,
+      }),
+    });
+    return mapCatalogExercise(raw);
+  },
+  saveWorkoutTemplate: async (
+    templateId: number | null,
+    name: string,
+    exercises: BuilderExercise[],
+  ): Promise<WorkoutPlan> => {
+    const body = JSON.stringify({
+      name,
+      exercises: exercises.map((item) => ({
+        exercise_id: item.exerciseId,
+        target_sets: item.targetSets,
+        rep_min: item.repMin,
+        rep_max: item.repMax,
+        weight_kg: item.weightKg,
+      })),
+    });
+    if (USE_MOCKS) return mockSaveTemplate(templateId, name, exercises);
+    const raw = await request<Record<string, unknown>>(
+      templateId ? `/workouts/templates/${templateId}` : "/workouts/templates",
+      { method: templateId ? "PUT" : "POST", body },
+    );
+    return mapWorkoutPlan(raw);
+  },
+  deleteWorkoutTemplate: async (templateId: number): Promise<void> => {
+    if (USE_MOCKS) {
+      mockDeleteTemplate(templateId);
+      return;
+    }
+    await request(`/workouts/templates/${templateId}`, { method: "DELETE" });
+  },
   progress: async (weeks = 8): Promise<ProgressData> => {
     if (USE_MOCKS) return { ...mockProgress, periodWeeks: weeks };
     const raw = await request<Record<string, unknown>>(`/progress?weeks=${weeks}`);
@@ -579,4 +657,29 @@ function localDateString(date = new Date()): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+
+function mapCatalogExercise(raw: Record<string, unknown>): CatalogExercise {
+  return {
+    id: toNumber(raw.id) ?? 0,
+    name: String(raw.name ?? "Упражнение"),
+    muscleGroup: String(raw.muscle_group ?? ""),
+    equipment: String(raw.equipment ?? ""),
+    imageKey: raw.image_key ? String(raw.image_key) : null,
+    isCustom: Boolean(raw.is_custom),
+  };
+}
+
+export function filterCatalog(
+  items: CatalogExercise[],
+  query?: string,
+  muscleGroup?: string,
+): CatalogExercise[] {
+  const needle = query?.trim().toLowerCase();
+  return items.filter(
+    (item) =>
+      (!muscleGroup || item.muscleGroup === muscleGroup) &&
+      (!needle || item.name.toLowerCase().includes(needle)),
+  );
 }

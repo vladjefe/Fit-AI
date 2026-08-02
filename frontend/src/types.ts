@@ -134,3 +134,35 @@ export interface ProgressPhotoData {
   note: string | null;
   stored: boolean;
 }
+
+export interface CatalogExercise {
+  id: number;
+  name: string;
+  muscleGroup: string;
+  equipment: string;
+  imageKey: string | null;
+  isCustom: boolean;
+}
+
+/** Строка конструктора: упражнение из каталога плюс заданные параметры. */
+export interface BuilderExercise {
+  exerciseId: number;
+  name: string;
+  imageKey: string | null;
+  muscleGroup: string;
+  targetSets: number;
+  repMin: number;
+  repMax: number;
+  weightKg: number;
+}
+
+export const MUSCLE_GROUPS = [
+  "Грудь",
+  "Спина",
+  "Плечи",
+  "Руки",
+  "Ноги",
+  "Ягодицы",
+  "Пресс",
+  "Кардио",
+] as const;

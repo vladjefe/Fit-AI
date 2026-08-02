@@ -10,6 +10,7 @@ import {
   Minus,
   Plus,
   RotateCcw,
+  Pencil,
   Sparkles,
   Target,
   Trophy,
@@ -20,6 +21,7 @@ import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { ExerciseImage } from "../components/ExerciseImage";
 import { RestTimer } from "../components/RestTimer";
+import { WorkoutBuilder } from "./WorkoutBuilder";
 import { api, isQueued } from "../services/api";
 import {
   armRestNotification,
@@ -66,6 +68,7 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
   const [completedWorkoutName, setCompletedWorkoutName] = useState<string | null>(null);
   const [selectedExerciseInfo, setSelectedExerciseInfo] = useState<Exercise | null>(null);
+  const [builder, setBuilder] = useState<{ workout: WorkoutPlan | null } | null>(null);
   const [restSeconds, setRestSeconds] = useState(DEFAULT_REST_SECONDS);
   const [restEndsAt, setRestEndsAt] = useState<number | null>(null);
   const [queuedCount, setQueuedCount] = useState(0);
@@ -301,6 +304,16 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
               disabled={Boolean(data.activeSessionId)}
               onSelect={selectWorkout}
             />
+            {!data.activeSessionId && (
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="secondary" onClick={() => setBuilder({ workout })}>
+                  <Pencil size={16} /> Изменить
+                </Button>
+                <Button variant="secondary" onClick={() => setBuilder({ workout: null })}>
+                  <Plus size={16} /> Своя тренировка
+                </Button>
+              </div>
+            )}
             {data.activeSessionId && (
               <Card className="border-orange-300/15 bg-orange-300/[0.06] p-4">
                 <p className="text-sm font-extrabold text-orange-200">Есть незавершённая тренировка</p>
@@ -585,6 +598,17 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
         }}
         onDismiss={stopRest}
       />
+
+      <AnimatePresence>
+        {builder && (
+          <WorkoutBuilder
+            workout={builder.workout}
+            canDelete={data.workoutTemplates.length > 1}
+            onClose={() => setBuilder(null)}
+            onSaved={onDataChanged}
+          />
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {selectedExerciseInfo && (

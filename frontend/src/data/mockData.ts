@@ -1,4 +1,11 @@
-import type { DashboardData, GoalData, ProgressData, ReminderData, WorkoutPlan } from "../types";
+import type {
+  BuilderExercise,
+  DashboardData,
+  GoalData,
+  ProgressData,
+  ReminderData,
+  WorkoutPlan,
+} from "../types";
 
 export const mockDashboard: DashboardData = {
   userName: "Алексей",
@@ -426,3 +433,48 @@ export const recentWorkouts = [
   { name: "Ноги 2", date: "26 июня", volume: "9 220 кг", accent: "#7dd3fc" },
   { name: "Верх 1", date: "23 июня", volume: "5 360 кг", accent: "#c4b5fd" },
 ];
+
+/** Демо-режим держит тренировки в памяти: перезапуск приложения их сбрасывает. */
+export function mockSaveTemplate(
+  templateId: number | null,
+  name: string,
+  exercises: BuilderExercise[],
+): WorkoutPlan {
+  const list = mockDashboard.workoutTemplates;
+  const existingIndex = list.findIndex((item) => item.templateId === templateId);
+  const plan: WorkoutPlan = {
+    templateId: templateId ?? Math.max(0, ...list.map((item) => item.templateId)) + 1,
+    name,
+    position: existingIndex >= 0 ? list[existingIndex].position : list.length + 1,
+    durationMinutes: Math.max(30, exercises.length * 10),
+    exercises: exercises.map((item, index) => ({
+      id: item.exerciseId * 1000 + index,
+      name: item.name,
+      imageKey: item.imageKey ?? "placeholder",
+      muscles: item.muscleGroup,
+      targetSets: item.targetSets,
+      repMin: item.repMin,
+      repMax: item.repMax,
+      weightKg: item.weightKg,
+      lastResult: item.weightKg > 0 ? `${item.weightKg} кг · новое` : "Новое упражнение",
+    })),
+  };
+  if (existingIndex >= 0) list[existingIndex] = plan;
+  else list.push(plan);
+  if (mockDashboard.nextWorkout.templateId === plan.templateId) {
+    mockDashboard.nextWorkout = plan;
+  }
+  return plan;
+}
+
+export function mockDeleteTemplate(templateId: number): void {
+  const list = mockDashboard.workoutTemplates;
+  const index = list.findIndex((item) => item.templateId === templateId);
+  if (index >= 0) list.splice(index, 1);
+  list.forEach((item, order) => {
+    item.position = order + 1;
+  });
+  if (mockDashboard.nextWorkout.templateId === templateId && list.length) {
+    mockDashboard.nextWorkout = list[0];
+  }
+}
