@@ -15,7 +15,7 @@ import { Card } from "../components/Card";
 import { ExerciseImage } from "../components/ExerciseImage";
 import { api } from "../services/api";
 import { vibrate } from "../services/native";
-import { MUSCLE_GROUPS } from "../types";
+import { EQUIPMENT_TYPES, MUSCLE_GROUPS } from "../types";
 import type { BuilderExercise, CatalogExercise, WorkoutPlan } from "../types";
 
 interface WorkoutBuilderProps {
@@ -403,6 +403,29 @@ function CatalogPicker({
   const [group, setGroup] = useState<string | null>(null);
   const [all, setAll] = useState<CatalogExercise[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [draftGroup, setDraftGroup] = useState<string>(MUSCLE_GROUPS[0]);
+  const [draftEquipment, setDraftEquipment] = useState<string>(EQUIPMENT_TYPES[0]);
+  const [savingDraft, setSavingDraft] = useState(false);
+
+  async function createAndPick() {
+    const name = query.trim();
+    if (!name || savingDraft) return;
+    setSavingDraft(true);
+    setError(null);
+    try {
+      const created = await api.createCustomExercise({
+        name,
+        muscleGroup: draftGroup,
+        equipment: draftEquipment,
+      });
+      setAll((current) => (current ? [...current, created] : [created]));
+      onPick(created);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось добавить упражнение");
+      setSavingDraft(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -484,10 +507,59 @@ function CatalogPicker({
         {!error && all === null && (
           <p className="py-8 text-center text-sm text-muted">Загружаю каталог…</p>
         )}
-        {all !== null && visible.length === 0 && (
-          <p className="py-8 text-center text-sm text-muted">
-            Ничего не нашлось. Попробуй другое название.
-          </p>
+        {all !== null && visible.length === 0 && !creating && (
+          <div className="py-8 text-center">
+            <p className="text-sm text-muted">Такого упражнения в каталоге нет.</p>
+            {query.trim() ? (
+              <Button variant="secondary" className="mt-4" onClick={() => setCreating(true)}>
+                <Plus size={16} /> Добавить «{query.trim()}»
+              </Button>
+            ) : (
+              <p className="mt-1.5 text-xs text-white/30">Начни вводить название.</p>
+            )}
+          </div>
+        )}
+
+        {creating && (
+          <div className="rounded-2xl border border-accent/20 bg-accent/[0.05] p-4">
+            <p className="text-sm font-extrabold">Своё упражнение</p>
+            <p className="mt-1 text-xs text-white/45">«{query.trim()}»</p>
+
+            <p className="mt-4 text-[10px] font-extrabold uppercase tracking-[0.14em] text-muted">
+              Группа мышц
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {MUSCLE_GROUPS.map((item) => (
+                <Chip key={item} active={draftGroup === item} onClick={() => setDraftGroup(item)}>
+                  {item}
+                </Chip>
+              ))}
+            </div>
+
+            <p className="mt-4 text-[10px] font-extrabold uppercase tracking-[0.14em] text-muted">
+              Оборудование
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {EQUIPMENT_TYPES.map((item) => (
+                <Chip
+                  key={item}
+                  active={draftEquipment === item}
+                  onClick={() => setDraftEquipment(item)}
+                >
+                  {item}
+                </Chip>
+              ))}
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <Button variant="secondary" onClick={() => setCreating(false)} disabled={savingDraft}>
+                Отмена
+              </Button>
+              <Button onClick={() => void createAndPick()} disabled={savingDraft}>
+                {savingDraft ? "Добавляю…" : "Добавить"}
+              </Button>
+            </div>
+          </div>
         )}
         <div className="space-y-1.5">
           {visible.map((item) => {
