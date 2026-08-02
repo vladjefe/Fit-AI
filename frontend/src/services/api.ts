@@ -7,6 +7,7 @@ import {
   mockGoals,
   mockProgress,
   mockReminders,
+  mockReorderTemplates,
   mockSaveTemplate,
 } from "../data/mockData";
 import type {
@@ -282,6 +283,14 @@ export const api = {
       { method: templateId ? "PUT" : "POST", body },
     );
     return mapWorkoutPlan(raw);
+  },
+  reorderWorkoutTemplates: async (order: number[]): Promise<WorkoutPlan[]> => {
+    if (USE_MOCKS) return mockReorderTemplates(order);
+    const raw = await request<Array<Record<string, unknown>>>("/workouts/templates/order", {
+      method: "PUT",
+      body: JSON.stringify({ order }),
+    });
+    return raw.map(mapWorkoutPlan);
   },
   deleteWorkoutTemplate: async (templateId: number): Promise<void> => {
     if (USE_MOCKS) {

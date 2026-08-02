@@ -2,7 +2,7 @@ import type { CatalogExercise } from "../types";
 
 /**
  * Копия серверного каталога для демо-режима без бэкенда.
- * Генерируется из backend/app/exercise_catalog.py — руками не править.
+ * Генерируется скриптом scripts/generate_catalog.py — руками не править.
  */
 export const mockCatalog: CatalogExercise[] = [
   { id: 1, name: "Жим штанги лёжа", muscleGroup: "Грудь", equipment: "Штанга", imageKey: "barbell-bench-press", isCustom: false },

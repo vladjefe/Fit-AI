@@ -478,3 +478,16 @@ export function mockDeleteTemplate(templateId: number): void {
     mockDashboard.nextWorkout = list[0];
   }
 }
+
+export function mockReorderTemplates(order: number[]): WorkoutPlan[] {
+  const byId = new Map(mockDashboard.workoutTemplates.map((item) => [item.templateId, item]));
+  const reordered = order
+    .map((id) => byId.get(id))
+    .filter((item): item is WorkoutPlan => Boolean(item));
+  reordered.forEach((item, index) => {
+    item.position = index + 1;
+  });
+  mockDashboard.workoutTemplates = reordered;
+  mockDashboard.nextWorkout = reordered[0] ?? mockDashboard.nextWorkout;
+  return reordered;
+}

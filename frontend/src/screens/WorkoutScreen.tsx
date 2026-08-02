@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { ExerciseImage } from "../components/ExerciseImage";
+import { CycleOrderSheet } from "../components/CycleOrderSheet";
 import { RestTimer } from "../components/RestTimer";
 import { WorkoutBuilder } from "./WorkoutBuilder";
 import { api, isQueued } from "../services/api";
@@ -69,6 +70,7 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
   const [completedWorkoutName, setCompletedWorkoutName] = useState<string | null>(null);
   const [selectedExerciseInfo, setSelectedExerciseInfo] = useState<Exercise | null>(null);
   const [builder, setBuilder] = useState<{ workout: WorkoutPlan | null } | null>(null);
+  const [orderingCycle, setOrderingCycle] = useState(false);
   const [restSeconds, setRestSeconds] = useState(DEFAULT_REST_SECONDS);
   const [restEndsAt, setRestEndsAt] = useState<number | null>(null);
   const [queuedCount, setQueuedCount] = useState(0);
@@ -303,6 +305,7 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
               selectedTemplateId={workout.templateId}
               disabled={Boolean(data.activeSessionId)}
               onSelect={selectWorkout}
+              onReorder={() => setOrderingCycle(true)}
             />
             {!data.activeSessionId && (
               <div className="grid grid-cols-2 gap-2">
@@ -600,6 +603,16 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
       />
 
       <AnimatePresence>
+        {orderingCycle && (
+          <CycleOrderSheet
+            workouts={data.workoutTemplates}
+            onClose={() => setOrderingCycle(false)}
+            onSaved={onDataChanged}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {builder && (
           <WorkoutBuilder
             workout={builder.workout}
@@ -672,17 +685,31 @@ function WorkoutPicker({
   selectedTemplateId,
   disabled,
   onSelect,
+  onReorder,
 }: {
   workouts: WorkoutPlan[];
   selectedTemplateId: number;
   disabled: boolean;
   onSelect: (templateId: number) => void;
+  onReorder?: () => void;
 }) {
   return (
     <div>
-      <p className="mb-2 px-1 text-[10px] font-extrabold uppercase tracking-[0.15em] text-muted">
-        Выбери тренировку
-      </p>
+      <div className="mb-2 flex items-baseline justify-between px-1">
+        <p className="text-[10px] font-extrabold uppercase tracking-[0.15em] text-muted">
+          Выбери тренировку
+        </p>
+        {workouts.length > 1 && onReorder && (
+          <button
+            type="button"
+            onClick={onReorder}
+            disabled={disabled}
+            className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-accent disabled:opacity-40"
+          >
+            Порядок
+          </button>
+        )}
+      </div>
       <div className="grid grid-cols-2 gap-2">
         {workouts.map((item) => (
           <button
