@@ -14,6 +14,7 @@ from backend.app.schemas import (
     BodyWeightInput,
     CardioInput,
     CompleteWorkoutInput,
+    CustomExerciseInput,
     DevicePairInput,
     ExerciseSetInput,
     GoalCreateInput,
@@ -21,12 +22,14 @@ from backend.app.schemas import (
     NutritionInput,
     PullUpInput,
     ReminderUpdateInput,
+    ReorderTemplatesInput,
     SendTrainerReportInput,
     SelectWorkoutInput,
     StartWorkoutInput,
     TrainerFeedbackInput,
     WellbeingInput,
     WeeklyAIInput,
+    WorkoutTemplateInput,
 )
 from backend.app.security import (
     get_current_user,
@@ -191,6 +194,63 @@ async def get_workout_detail(
     db: AsyncSession = Depends(get_db),
 ):
     return await services.workout_detail(db, owner, session_id)
+
+
+@router.get("/exercises", tags=["workouts"])
+async def get_exercise_catalog(
+    q: str | None = Query(default=None, max_length=160),
+    muscle_group: str | None = Query(default=None, max_length=40),
+    owner: User = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Каталог упражнений для конструктора: общий справочник и свои движения."""
+    return await services.exercise_catalog(db, owner, q, muscle_group)
+
+
+@router.post("/exercises", status_code=201, tags=["workouts"])
+async def post_custom_exercise(
+    payload: CustomExerciseInput,
+    owner: User = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    return await services.create_custom_exercise(db, owner, payload)
+
+
+@router.post("/workouts/templates", status_code=201, tags=["workouts"])
+async def post_workout_template(
+    payload: WorkoutTemplateInput,
+    owner: User = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    return await services.create_workout_template(db, owner, payload)
+
+
+@router.put("/workouts/templates/order", tags=["workouts"])
+async def put_workout_template_order(
+    payload: ReorderTemplatesInput,
+    owner: User = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    return await services.reorder_workout_templates(db, owner, payload.order)
+
+
+@router.put("/workouts/templates/{template_id}", tags=["workouts"])
+async def put_workout_template(
+    template_id: int,
+    payload: WorkoutTemplateInput,
+    owner: User = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    return await services.update_workout_template(db, owner, template_id, payload)
+
+
+@router.delete("/workouts/templates/{template_id}", tags=["workouts"])
+async def delete_workout_template(
+    template_id: int,
+    owner: User = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    return await services.delete_workout_template(db, owner, template_id)
 
 
 @router.get("/progress", tags=["tracking"])

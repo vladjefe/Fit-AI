@@ -11,8 +11,10 @@ from sqlalchemy.orm import selectinload
 
 from backend.app.config import get_settings
 from backend.app.db import SessionFactory
+from backend.app.exercise_catalog import CATALOG
 from backend.app.models import (
     BodyWeight,
+    Exercise,
     CardioLog,
     ExerciseSet,
     ExerciseTemplate,
@@ -27,6 +29,31 @@ from backend.app.models import (
     WorkoutStatus,
     WorkoutTemplate,
 )
+
+
+
+async def seed_exercise_catalog(db: AsyncSession) -> int:
+    """Наполняет общий каталог. Повторный запуск только дописывает недостающее."""
+    existing = set(
+        (await db.scalars(select(Exercise.name).where(Exercise.user_id.is_(None)))).all()
+    )
+    added = 0
+    for entry in CATALOG:
+        if entry.name in existing:
+            continue
+        db.add(
+            Exercise(
+                user_id=None,
+                name=entry.name,
+                muscle_group=entry.muscle_group,
+                equipment=entry.equipment,
+                image_key=entry.image_key,
+            )
+        )
+        added += 1
+    if added:
+        await db.flush()
+    return added
 
 
 WORKOUTS = [
@@ -144,14 +171,21 @@ async def seed_database(db: AsyncSession, include_demo: bool = False) -> None:
             goal.target_value = target
             goal.unit = unit
 
+    await seed_exercise_catalog(db)
+
     for position, (name, exercise_rows) in enumerate(WORKOUTS):
         template = await db.scalar(
             select(WorkoutTemplate)
             .options(selectinload(WorkoutTemplate.exercises))
-            .where(WorkoutTemplate.cycle_position == position)
+            .where(
+                WorkoutTemplate.cycle_position == position,
+                WorkoutTemplate.user_id == owner.id,
+            )
         )
         if template is None:
-            template = WorkoutTemplate(name=name, cycle_position=position, exercises=[])
+            template = WorkoutTemplate(
+                name=name, cycle_position=position, user_id=owner.id, exercises=[]
+            )
             db.add(template)
             await db.flush()
         else:

@@ -108,5 +108,36 @@ class DevicePairInput(BaseModel):
     device_name: str | None = Field(default=None, max_length=100)
 
 
+class TemplateExerciseInput(BaseModel):
+    exercise_id: int = Field(ge=1)
+    target_sets: int = Field(default=3, ge=1, le=12)
+    rep_min: int = Field(default=8, ge=1, le=100)
+    rep_max: int = Field(default=12, ge=1, le=100)
+    weight_kg: Decimal = Field(default=Decimal("0"), ge=0, le=2000)
+
+    @field_validator("rep_max")
+    @classmethod
+    def check_range(cls, value: int, info) -> int:
+        rep_min = info.data.get("rep_min")
+        if rep_min is not None and value < rep_min:
+            raise ValueError("rep_max не может быть меньше rep_min")
+        return value
+
+
+class WorkoutTemplateInput(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    exercises: list[TemplateExerciseInput] = Field(min_length=1, max_length=30)
+
+
+class ReorderTemplatesInput(BaseModel):
+    order: list[int] = Field(min_length=1, max_length=30)
+
+
+class CustomExerciseInput(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    muscle_group: str = Field(min_length=1, max_length=40)
+    equipment: str = Field(min_length=1, max_length=40)
+
+
 class HealthResponse(BaseModel):
     status: str

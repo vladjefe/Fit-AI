@@ -61,12 +61,30 @@ class User(Base):
     )
 
 
-class WorkoutTemplate(Base):
-    __tablename__ = "workout_templates"
+class Exercise(Base):
+    """Каталог упражнений. user_id = NULL — общий справочник, иначе своё упражнение."""
+
+    __tablename__ = "exercises"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True)
-    cycle_position: Mapped[int] = mapped_column(Integer, unique=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(160), index=True)
+    muscle_group: Mapped[str] = mapped_column(String(40), index=True)
+    equipment: Mapped[str] = mapped_column(String(40), index=True)
+    image_key: Mapped[str | None] = mapped_column(String(160))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorkoutTemplate(Base):
+    """Тренировка пользователя. Позиция в цикле уникальна в пределах владельца."""
+
+    __tablename__ = "workout_templates"
+    __table_args__ = (UniqueConstraint("user_id", "cycle_position"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    cycle_position: Mapped[int] = mapped_column(Integer)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -87,6 +105,9 @@ class ExerciseTemplate(Base):
     workout_template_id: Mapped[int] = mapped_column(
         ForeignKey("workout_templates.id", ondelete="CASCADE"), index=True
     )
+    # name и image_key продублированы намеренно: правка каталога не должна
+    # задним числом менять уже проведённые тренировки.
+    exercise_id: Mapped[int | None] = mapped_column(ForeignKey("exercises.id"))
     name: Mapped[str] = mapped_column(String(160))
     image_key: Mapped[str] = mapped_column(String(160))
     sort_order: Mapped[int] = mapped_column(Integer)

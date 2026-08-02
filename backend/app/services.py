@@ -14,12 +14,13 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from fastapi import HTTPException, status
 from openai import AsyncOpenAI
 from starlette.datastructures import UploadFile
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.config import BASE_DIR, Settings
 from backend.app.models import (
+    Exercise,
     AIReport,
     BodyWeight,
     CardioLog,
@@ -49,8 +50,10 @@ from backend.app.schemas import (
     GoalUpdateInput,
     NutritionInput,
     PullUpInput,
+    CustomExerciseInput,
     ReminderUpdateInput,
     TrainerFeedbackInput,
+    WorkoutTemplateInput,
     WellbeingInput,
 )
 
@@ -63,15 +66,37 @@ def _moscow_today() -> date:
     return utcnow().astimezone(ZoneInfo("Europe/Moscow")).date()
 
 
-async def _template_for_position(db: AsyncSession, position: int) -> WorkoutTemplate:
-    template = await db.scalar(
-        select(WorkoutTemplate)
-        .options(selectinload(WorkoutTemplate.exercises))
-        .where(
-            WorkoutTemplate.cycle_position == position,
-            WorkoutTemplate.is_active.is_(True),
-        )
+def _owned_templates(owner: User):
+    """Шаблоны владельца плюс общие, оставшиеся от прежней глобальной схемы."""
+    return select(WorkoutTemplate).where(
+        WorkoutTemplate.is_active.is_(True),
+        or_(WorkoutTemplate.user_id == owner.id, WorkoutTemplate.user_id.is_(None)),
     )
+
+
+async def cycle_length(db: AsyncSession, owner: User) -> int:
+    """Длина цикла = число тренировок пользователя, а не фиксированные четыре."""
+    count = await db.scalar(
+        select(func.count()).select_from(_owned_templates(owner).subquery())
+    )
+    return max(1, int(count or 0))
+
+
+async def _template_for_position(
+    db: AsyncSession, owner: User, position: int
+) -> WorkoutTemplate:
+    template = await db.scalar(
+        _owned_templates(owner)
+        .options(selectinload(WorkoutTemplate.exercises))
+        .where(WorkoutTemplate.cycle_position == position)
+    )
+    if template is None:
+        # Позиция могла выйти за пределы после удаления тренировки — берём первую.
+        template = await db.scalar(
+            _owned_templates(owner)
+            .options(selectinload(WorkoutTemplate.exercises))
+            .order_by(WorkoutTemplate.cycle_position)
+        )
     if template is None:
         raise HTTPException(status_code=503, detail="Программа тренировок не настроена")
     return template
@@ -207,7 +232,7 @@ async def next_workout(db: AsyncSession, owner: User) -> dict[str, Any]:
             .where(WorkoutTemplate.id == selected_id, WorkoutTemplate.is_active.is_(True))
         )
     if template is None:
-        template = await _template_for_position(db, owner.current_cycle_position)
+        template = await _template_for_position(db, owner, owner.current_cycle_position)
     return await _workout_template_payload(db, owner, template)
 
 
@@ -232,9 +257,8 @@ async def workout_templates(db: AsyncSession, owner: User) -> list[dict[str, Any
     templates = list(
         (
             await db.scalars(
-                select(WorkoutTemplate)
+                _owned_templates(owner)
                 .options(selectinload(WorkoutTemplate.exercises))
-                .where(WorkoutTemplate.is_active.is_(True))
                 .order_by(WorkoutTemplate.cycle_position)
             )
         ).all()
@@ -267,7 +291,7 @@ async def start_workout(
         }
     selected_id = template_id or owner.selected_workout_template_id
     if selected_id is None:
-        template = await _template_for_position(db, owner.current_cycle_position)
+        template = await _template_for_position(db, owner, owner.current_cycle_position)
     else:
         template = await db.scalar(
             select(WorkoutTemplate)
@@ -380,7 +404,8 @@ async def complete_workout(
     )
 
     if owner.current_cycle_position == session.cycle_position:
-        if owner.current_cycle_position == 3:
+        length = await cycle_length(db, owner)
+        if owner.current_cycle_position >= length - 1:
             owner.current_cycle_position = 0
             owner.cycle_number += 1
         else:
@@ -455,8 +480,9 @@ async def _recalculate_cycle_from_completed(db: AsyncSession, owner: User) -> No
         )
     )
     count = int(completed_count or 0)
-    owner.current_cycle_position = count % 4
-    owner.cycle_number = count // 4 + 1
+    length = await cycle_length(db, owner)
+    owner.current_cycle_position = count % length
+    owner.cycle_number = count // length + 1
 
 
 async def workout_summary(db: AsyncSession, session: WorkoutSession) -> dict[str, Any]:
@@ -471,6 +497,8 @@ async def workout_summary(db: AsyncSession, session: WorkoutSession) -> dict[str
     for item in session.sets:
         if item.is_completed:
             grouped[item.exercise_template_id].append(item)
+    owner = await db.get(User, session.user_id)
+    length = await cycle_length(db, owner) if owner is not None else 4
     exercise_rows = list(
         (
             await db.scalars(
@@ -494,7 +522,7 @@ async def workout_summary(db: AsyncSession, session: WorkoutSession) -> dict[str
         "workout_name": session.template.name,
         "completed_at": session.completed_at,
         "total_volume_kg": _as_float(session.total_volume_kg),
-        "next_cycle_position": (session.cycle_position + 1) % 4,
+        "next_cycle_position": (session.cycle_position + 1) % length,
         "progression": progression,
     }
 
@@ -1737,3 +1765,244 @@ async def save_trainer_feedback(
         "comment": feedback.comment,
         "updated_at": feedback.updated_at,
     }
+
+
+async def exercise_catalog(
+    db: AsyncSession,
+    owner: User,
+    query: str | None = None,
+    muscle_group: str | None = None,
+) -> list[dict[str, Any]]:
+    """Общий каталог плюс собственные упражнения пользователя."""
+    statement = select(Exercise).where(
+        or_(Exercise.user_id.is_(None), Exercise.user_id == owner.id)
+    )
+    if query:
+        statement = statement.where(Exercise.name.ilike(f"%{query.strip()}%"))
+    if muscle_group:
+        statement = statement.where(Exercise.muscle_group == muscle_group)
+    rows = (
+        await db.scalars(statement.order_by(Exercise.muscle_group, Exercise.name))
+    ).all()
+    return [
+        {
+            "id": item.id,
+            "name": item.name,
+            "muscle_group": item.muscle_group,
+            "equipment": item.equipment,
+            "image_key": item.image_key,
+            "is_custom": item.user_id is not None,
+        }
+        for item in rows
+    ]
+
+
+async def create_custom_exercise(
+    db: AsyncSession, owner: User, payload: CustomExerciseInput
+) -> dict[str, Any]:
+    exercise = Exercise(
+        user_id=owner.id,
+        name=payload.name.strip(),
+        muscle_group=payload.muscle_group,
+        equipment=payload.equipment,
+        image_key=None,
+    )
+    db.add(exercise)
+    await db.commit()
+    await db.refresh(exercise)
+    return {
+        "id": exercise.id,
+        "name": exercise.name,
+        "muscle_group": exercise.muscle_group,
+        "equipment": exercise.equipment,
+        "image_key": None,
+        "is_custom": True,
+    }
+
+
+async def _resolve_catalog(
+    db: AsyncSession, owner: User, items: list[Any]
+) -> dict[int, Exercise]:
+    """Проверяет упражнения до записи шаблона: иначе неудачное сохранение
+    оставило бы в базе наполовину созданную тренировку."""
+    catalog = {
+        item.id: item
+        for item in (
+            await db.scalars(
+                select(Exercise).where(
+                    Exercise.id.in_([entry.exercise_id for entry in items]),
+                    or_(Exercise.user_id.is_(None), Exercise.user_id == owner.id),
+                )
+            )
+        ).all()
+    }
+    missing = [entry.exercise_id for entry in items if entry.exercise_id not in catalog]
+    if missing:
+        raise HTTPException(
+            status_code=404, detail=f"Упражнение не найдено: {missing[0]}"
+        )
+    return catalog
+
+
+async def _apply_template_exercises(
+    db: AsyncSession,
+    template: WorkoutTemplate,
+    items: list[Any],
+    catalog: dict[int, Exercise],
+) -> None:
+    """Переписывает состав тренировки, подтягивая названия из каталога."""
+    # Явный запрос вместо template.exercises: у только что созданного шаблона
+    # обращение к связи вызвало бы ленивую загрузку вне async-контекста.
+    current = (
+        await db.scalars(
+            select(ExerciseTemplate).where(
+                ExerciseTemplate.workout_template_id == template.id
+            )
+        )
+    ).all()
+    for existing in current:
+        await db.delete(existing)
+    await db.flush()
+
+    for order, entry in enumerate(items, start=1):
+        source = catalog[entry.exercise_id]
+        db.add(
+            ExerciseTemplate(
+                workout_template_id=template.id,
+                exercise_id=source.id,
+                sort_order=order,
+                name=source.name,
+                image_key=source.image_key or "",
+                base_weight_kg=Decimal(str(entry.weight_kg)),
+                target_sets=entry.target_sets,
+                rep_min=entry.rep_min,
+                rep_max=entry.rep_max,
+            )
+        )
+
+
+
+async def _renumber_positions(
+    db: AsyncSession, templates: list[WorkoutTemplate]
+) -> None:
+    """UNIQUE(user_id, cycle_position) не переживает перестановку «в лоб»:
+    сначала уводим позиции в заведомо свободный отрицательный диапазон."""
+    for index, template in enumerate(templates):
+        template.cycle_position = -(10_000_000 + index)
+    await db.flush()
+    for index, template in enumerate(templates):
+        template.cycle_position = index
+    await db.flush()
+
+
+async def create_workout_template(
+    db: AsyncSession, owner: User, payload: WorkoutTemplateInput
+) -> dict[str, Any]:
+    catalog = await _resolve_catalog(db, owner, payload.exercises)
+    used = set(
+        (
+            await db.scalars(
+                select(WorkoutTemplate.cycle_position).where(
+                    WorkoutTemplate.user_id == owner.id
+                )
+            )
+        ).all()
+    )
+    position = next(index for index in range(len(used) + 1) if index not in used)
+    template = WorkoutTemplate(
+        user_id=owner.id, name=payload.name.strip(), cycle_position=position
+    )
+    db.add(template)
+    await db.flush()
+    await _apply_template_exercises(db, template, payload.exercises, catalog)
+    await db.commit()
+    return await _reload_template_payload(db, owner, template.id)
+
+
+async def update_workout_template(
+    db: AsyncSession, owner: User, template_id: int, payload: WorkoutTemplateInput
+) -> dict[str, Any]:
+    catalog = await _resolve_catalog(db, owner, payload.exercises)
+    template = await _owned_template_or_404(db, owner, template_id)
+    template.name = payload.name.strip()
+    await _apply_template_exercises(db, template, payload.exercises, catalog)
+    await db.commit()
+    return await _reload_template_payload(db, owner, template.id)
+
+
+async def delete_workout_template(
+    db: AsyncSession, owner: User, template_id: int
+) -> dict[str, Any]:
+    template = await _owned_template_or_404(db, owner, template_id)
+    remaining = await cycle_length(db, owner)
+    if remaining <= 1:
+        raise HTTPException(
+            status_code=409, detail="Нужна хотя бы одна тренировка в цикле"
+        )
+    # Сессии ссылаются на шаблон, поэтому прячем, а не удаляем: история должна жить.
+    # Позицию уводим в минус, иначе скрытая запись занимала бы слот в цикле.
+    template.is_active = False
+    template.cycle_position = -template.id
+    if owner.selected_workout_template_id == template.id:
+        owner.selected_workout_template_id = None
+    await db.flush()
+
+    survivors = list(
+        (
+            await db.scalars(
+                _owned_templates(owner).order_by(WorkoutTemplate.cycle_position)
+            )
+        ).all()
+    )
+    await _renumber_positions(db, survivors)
+    owner.current_cycle_position = min(
+        owner.current_cycle_position, max(0, len(survivors) - 1)
+    )
+    await db.commit()
+    return {"deleted": True, "template_id": template_id}
+
+
+async def reorder_workout_templates(
+    db: AsyncSession, owner: User, order: list[int]
+) -> list[dict[str, Any]]:
+    templates = {
+        item.id: item
+        for item in (await db.scalars(_owned_templates(owner))).all()
+    }
+    if set(order) != set(templates):
+        raise HTTPException(status_code=400, detail="Список тренировок не совпадает")
+    await _renumber_positions(db, [templates[item] for item in order])
+    await db.commit()
+    return await workout_templates(db, owner)
+
+
+async def _owned_template_or_404(
+    db: AsyncSession, owner: User, template_id: int
+) -> WorkoutTemplate:
+    template = await db.scalar(
+        select(WorkoutTemplate)
+        .options(selectinload(WorkoutTemplate.exercises))
+        .where(
+            WorkoutTemplate.id == template_id,
+            WorkoutTemplate.is_active.is_(True),
+            or_(WorkoutTemplate.user_id == owner.id, WorkoutTemplate.user_id.is_(None)),
+        )
+    )
+    if template is None:
+        raise HTTPException(status_code=404, detail="Тренировка не найдена")
+    return template
+
+
+async def _reload_template_payload(
+    db: AsyncSession, owner: User, template_id: int
+) -> dict[str, Any]:
+    # populate_existing обязателен: сессия живёт с expire_on_commit=False, и без
+    # него вернулся бы состав упражнений, закешированный до правки.
+    template = await db.scalar(
+        select(WorkoutTemplate)
+        .options(selectinload(WorkoutTemplate.exercises))
+        .where(WorkoutTemplate.id == template_id)
+        .execution_options(populate_existing=True)
+    )
+    assert template is not None
+    return await _workout_template_payload(db, owner, template)
