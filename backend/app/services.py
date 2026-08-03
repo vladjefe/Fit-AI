@@ -183,6 +183,7 @@ async def _exercise_payload(
     last_sets = await _last_sets_for_exercise(db, owner.id, exercise.id)
     return {
         "id": exercise.id,
+        "exercise_id": exercise.exercise_id,
         "name": exercise.name,
         "image_key": exercise.image_key,
         "image_path": f"/assets/exercises/{exercise.image_key}.png",
@@ -389,6 +390,7 @@ async def complete_workout(
     if session.status == WorkoutStatus.COMPLETED:
         summary = await workout_summary(db, session)
         summary["newly_completed"] = False
+        summary["records"] = []
         return summary
     if session.status != WorkoutStatus.IN_PROGRESS:
         raise HTTPException(status_code=409, detail="Нельзя завершить отмененную тренировку")
@@ -416,6 +418,7 @@ async def complete_workout(
     await db.refresh(session)
     summary = await workout_summary(db, session)
     summary["newly_completed"] = True
+    summary["records"] = await session_records(db, owner, session)
     return summary
 
 
@@ -2034,3 +2037,152 @@ async def _reload_template_payload(
     )
     assert template is not None
     return await _workout_template_payload(db, owner, template)
+
+
+def _history_key(exercise: Exercise | ExerciseTemplate):
+    """Строка шаблона живёт в одной тренировке, каталожный id — общий.
+
+    История собирается по каталогу, иначе одно и то же движение в двух
+    тренировках дало бы две разные истории. У строк, оставшихся от прежней
+    схемы, каталожного id нет — для них резервный ключ имя.
+    """
+    if getattr(exercise, "exercise_id", None) is not None:
+        return ExerciseTemplate.exercise_id == exercise.exercise_id
+    return ExerciseTemplate.name == exercise.name
+
+
+async def _completed_sets_for(
+    db: AsyncSession, owner: User, criterion, exclude_session_id: int | None = None
+) -> list[tuple[datetime, Decimal, int, int]]:
+    statement = (
+        select(
+            WorkoutSession.completed_at,
+            ExerciseSet.weight_kg,
+            ExerciseSet.reps,
+            WorkoutSession.id,
+        )
+        .join(ExerciseTemplate, ExerciseTemplate.id == ExerciseSet.exercise_template_id)
+        .join(WorkoutSession, WorkoutSession.id == ExerciseSet.workout_session_id)
+        .where(
+            WorkoutSession.user_id == owner.id,
+            WorkoutSession.status == WorkoutStatus.COMPLETED,
+            ExerciseSet.is_completed.is_(True),
+            criterion,
+        )
+        .order_by(WorkoutSession.completed_at)
+    )
+    if exclude_session_id is not None:
+        statement = statement.where(WorkoutSession.id != exclude_session_id)
+    return list((await db.execute(statement)).all())
+
+
+async def exercise_history(
+    db: AsyncSession, owner: User, exercise_id: int, limit: int = 12
+) -> dict[str, Any]:
+    """Динамика и рекорды по упражнению каталога."""
+    source = await db.scalar(
+        select(Exercise).where(
+            Exercise.id == exercise_id,
+            or_(Exercise.user_id.is_(None), Exercise.user_id == owner.id),
+        )
+    )
+    if source is None:
+        raise HTTPException(status_code=404, detail="Упражнение не найдено")
+
+    rows = await _completed_sets_for(db, owner, ExerciseTemplate.exercise_id == exercise_id)
+    grouped: dict[int, dict[str, Any]] = {}
+    for completed_at, weight, reps, session_id in rows:
+        entry = grouped.setdefault(
+            session_id,
+            {"completed_at": completed_at, "top_weight_kg": Decimal("0"), "volume_kg": Decimal("0"), "sets": 0, "top_reps": 0},
+        )
+        entry["top_weight_kg"] = max(entry["top_weight_kg"], weight)
+        entry["top_reps"] = max(entry["top_reps"], reps)
+        entry["volume_kg"] += weight * reps
+        entry["sets"] += 1
+
+    sessions = sorted(grouped.values(), key=lambda item: item["completed_at"])
+    records = {"max_weight_kg": None, "max_reps": None, "max_session_volume_kg": None}
+    if sessions:
+        best_weight = max(sessions, key=lambda item: item["top_weight_kg"])
+        best_reps = max(sessions, key=lambda item: item["top_reps"])
+        best_volume = max(sessions, key=lambda item: item["volume_kg"])
+        records = {
+            "max_weight_kg": {
+                "value": _as_float(best_weight["top_weight_kg"]),
+                "achieved_at": _aware_utc(best_weight["completed_at"]),
+            },
+            "max_reps": {
+                "value": best_reps["top_reps"],
+                "achieved_at": _aware_utc(best_reps["completed_at"]),
+            },
+            "max_session_volume_kg": {
+                "value": _as_float(best_volume["volume_kg"]),
+                "achieved_at": _aware_utc(best_volume["completed_at"]),
+            },
+        }
+
+    return {
+        "exercise_id": source.id,
+        "name": source.name,
+        "muscle_group": source.muscle_group,
+        "equipment": source.equipment,
+        "records": records,
+        "sessions": [
+            {
+                "completed_at": _aware_utc(item["completed_at"]),
+                "top_weight_kg": _as_float(item["top_weight_kg"]),
+                "top_reps": item["top_reps"],
+                "volume_kg": _as_float(item["volume_kg"]),
+                "sets": item["sets"],
+            }
+            for item in sessions[-limit:]
+        ],
+    }
+
+
+async def session_records(
+    db: AsyncSession, owner: User, session: WorkoutSession
+) -> list[dict[str, Any]]:
+    """Упражнения, в которых эта тренировка побила все предыдущие."""
+    by_template: dict[int, list[ExerciseSet]] = defaultdict(list)
+    for item in session.sets:
+        if item.is_completed:
+            by_template[item.exercise_template_id].append(item)
+    if not by_template:
+        return []
+
+    templates = list(
+        (
+            await db.scalars(
+                select(ExerciseTemplate).where(ExerciseTemplate.id.in_(by_template.keys()))
+            )
+        ).all()
+    )
+
+    found: list[dict[str, Any]] = []
+    for template in templates:
+        current = by_template[template.id]
+        best_weight = max(item.weight_kg for item in current)
+        volume = sum((item.weight_kg * item.reps for item in current), Decimal("0"))
+
+        previous = await _completed_sets_for(
+            db, owner, _history_key(template), exclude_session_id=session.id
+        )
+        if not previous:
+            continue  # первая тренировка на упражнение рекордом не считается
+
+        prior_weight = max(row[1] for row in previous)
+        prior_volume: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+        for _, weight, reps, other_session in previous:
+            prior_volume[other_session] += weight * reps
+
+        if best_weight > prior_weight:
+            found.append(
+                {"exercise_name": template.name, "kind": "weight", "value": _as_float(best_weight)}
+            )
+        elif volume > max(prior_volume.values()):
+            found.append(
+                {"exercise_name": template.name, "kind": "volume", "value": _as_float(volume)}
+            )
+    return found

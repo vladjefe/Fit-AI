@@ -2,6 +2,8 @@ export type AppTab = "home" | "workout" | "progress" | "goals" | "profile";
 
 export interface Exercise {
   id: number;
+  /** id записи каталога: по нему запрашивается история. */
+  catalogId?: number | null;
   name: string;
   imageKey: string;
   muscles: string;
@@ -178,3 +180,31 @@ export const EQUIPMENT_TYPES = [
   "Функциональное",
   "Кардио",
 ] as const;
+
+export interface ExerciseRecord {
+  value: number;
+  achievedAt: string;
+}
+
+export interface ExerciseHistory {
+  exerciseId: number;
+  name: string;
+  records: {
+    maxWeightKg: ExerciseRecord | null;
+    maxReps: ExerciseRecord | null;
+    maxSessionVolumeKg: ExerciseRecord | null;
+  };
+  sessions: Array<{
+    completedAt: string;
+    topWeightKg: number;
+    topReps: number;
+    volumeKg: number;
+    sets: number;
+  }>;
+}
+
+export interface SessionRecord {
+  exerciseName: string;
+  kind: "weight" | "volume";
+  value: number;
+}

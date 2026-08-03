@@ -449,6 +449,7 @@ export function mockSaveTemplate(
     durationMinutes: Math.max(30, exercises.length * 10),
     exercises: exercises.map((item, index) => ({
       id: item.exerciseId * 1000 + index,
+      catalogId: item.exerciseId,
       name: item.name,
       imageKey: item.imageKey ?? "placeholder",
       muscles: item.muscleGroup,

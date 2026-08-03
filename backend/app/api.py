@@ -207,6 +207,17 @@ async def get_exercise_catalog(
     return await services.exercise_catalog(db, owner, q, muscle_group)
 
 
+@router.get("/exercises/{exercise_id}/history", tags=["workouts"])
+async def get_exercise_history(
+    exercise_id: int,
+    limit: int = Query(default=12, ge=1, le=60),
+    owner: User = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Динамика и личные рекорды по упражнению каталога."""
+    return await services.exercise_history(db, owner, exercise_id, limit)
+
+
 @router.post("/exercises", status_code=201, tags=["workouts"])
 async def post_custom_exercise(
     payload: CustomExerciseInput,

@@ -13,12 +13,14 @@ import {
 import type {
   BuilderExercise,
   CatalogExercise,
+  ExerciseHistory,
   DashboardData,
   GoalData,
   ProgressData,
   ProgressPhotoData,
   ReminderData,
   SavedSet,
+  SessionRecord,
   WorkoutDetail,
   WorkoutPlan,
 } from "../types";
@@ -163,13 +165,35 @@ export const api = {
       },
       `Подход ${set.setNumber}`,
     ),
-  completeWorkout: (sessionId: number) =>
-    USE_MOCKS
-      ? Promise.resolve({ session_id: sessionId, completed: true })
-      : request(`/workouts/${sessionId}/complete`, {
+  completeWorkout: async (
+    sessionId: number,
+    feedback: { perceivedExertion?: number | null; notes?: string | null } = {},
+  ): Promise<{ records: SessionRecord[] }> => {
+    if (USE_MOCKS) return { records: [] };
+    const raw = await request<Record<string, unknown>>(`/workouts/${sessionId}/complete`, {
       method: "POST",
-      body: JSON.stringify({ perceived_exertion: 8 }),
-    }),
+      body: JSON.stringify({
+        perceived_exertion: feedback.perceivedExertion ?? null,
+        notes: feedback.notes?.trim() || null,
+      }),
+    });
+    const records = Array.isArray(raw.records) ? raw.records : [];
+    return {
+      records: records.map((item) => {
+        const row = item as Record<string, unknown>;
+        return {
+          exerciseName: String(row.exercise_name ?? ""),
+          kind: row.kind === "volume" ? "volume" : "weight",
+          value: toNumber(row.value) ?? 0,
+        } satisfies SessionRecord;
+      }),
+    };
+  },
+  exerciseHistory: async (catalogId: number): Promise<ExerciseHistory> => {
+    if (USE_MOCKS) return mockHistory(catalogId);
+    const raw = await request<Record<string, unknown>>(`/exercises/${catalogId}/history`);
+    return mapHistory(raw);
+  },
   cancelWorkout: (sessionId: number) =>
     USE_MOCKS
       ? Promise.resolve({ session_id: sessionId, cancelled: true })
@@ -471,6 +495,7 @@ function mapExercise(raw: Record<string, unknown>) {
   const imagePath = String(raw.image_path ?? "");
   return {
     id: toNumber(raw.id) ?? 0,
+    catalogId: toNumber(raw.exercise_id) ?? null,
     name: String(raw.name ?? "Упражнение"),
     imageKey:
       String(raw.image_key ?? "") ||
@@ -691,4 +716,65 @@ export function filterCatalog(
       (!muscleGroup || item.muscleGroup === muscleGroup) &&
       (!needle || item.name.toLowerCase().includes(needle)),
   );
+}
+
+
+function mapRecord(raw: unknown) {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const value = toNumber(row.value);
+  if (value === null) return null;
+  return { value, achievedAt: String(row.achieved_at ?? "") };
+}
+
+function mapHistory(raw: Record<string, unknown>): ExerciseHistory {
+  const records = (raw.records ?? {}) as Record<string, unknown>;
+  const sessions = Array.isArray(raw.sessions) ? raw.sessions : [];
+  return {
+    exerciseId: toNumber(raw.exercise_id) ?? 0,
+    name: String(raw.name ?? ""),
+    records: {
+      maxWeightKg: mapRecord(records.max_weight_kg),
+      maxReps: mapRecord(records.max_reps),
+      maxSessionVolumeKg: mapRecord(records.max_session_volume_kg),
+    },
+    sessions: sessions.map((item) => {
+      const row = item as Record<string, unknown>;
+      return {
+        completedAt: String(row.completed_at ?? ""),
+        topWeightKg: toNumber(row.top_weight_kg) ?? 0,
+        topReps: toNumber(row.top_reps) ?? 0,
+        volumeKg: toNumber(row.volume_kg) ?? 0,
+        sets: toNumber(row.sets) ?? 0,
+      };
+    }),
+  };
+}
+
+/** Демо-режим: правдоподобный рост, чтобы раздел не выглядел пустым. */
+function mockHistory(catalogId: number): ExerciseHistory {
+  const base = 40 + (catalogId % 7) * 7.5;
+  const day = 86_400_000;
+  const sessions = Array.from({ length: 8 }, (_, index) => {
+    const topWeightKg = base + Math.floor(index / 2) * 2.5;
+    const topReps = 10 + (index % 3);
+    return {
+      completedAt: new Date(Date.now() - (8 - index) * 4 * day).toISOString(),
+      topWeightKg,
+      topReps,
+      volumeKg: topWeightKg * topReps * 3,
+      sets: 3,
+    };
+  });
+  const best = sessions[sessions.length - 1];
+  return {
+    exerciseId: catalogId,
+    name: "",
+    records: {
+      maxWeightKg: { value: best.topWeightKg, achievedAt: best.completedAt },
+      maxReps: { value: 12, achievedAt: best.completedAt },
+      maxSessionVolumeKg: { value: best.volumeKg, achievedAt: best.completedAt },
+    },
+    sessions,
+  };
 }

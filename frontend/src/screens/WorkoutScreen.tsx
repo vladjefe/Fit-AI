@@ -13,6 +13,7 @@ import {
   Pencil,
   Sparkles,
   Target,
+  Award,
   Trophy,
   X,
 } from "lucide-react";
@@ -21,6 +22,7 @@ import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { ExerciseImage } from "../components/ExerciseImage";
 import { CycleOrderSheet } from "../components/CycleOrderSheet";
+import { ExerciseTrend } from "../components/ExerciseTrend";
 import { RestTimer } from "../components/RestTimer";
 import { WorkoutBuilder } from "./WorkoutBuilder";
 import { api, isQueued } from "../services/api";
@@ -30,7 +32,7 @@ import {
   DEFAULT_REST_SECONDS,
   loadRestDuration,
 } from "../services/restTimer";
-import type { DashboardData, Exercise, SavedSet, WorkoutPlan } from "../types";
+import type { DashboardData, Exercise, SavedSet, SessionRecord, WorkoutPlan } from "../types";
 
 type Stage = "overview" | "active" | "exercise-result" | "complete";
 
@@ -74,6 +76,9 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
   const [restSeconds, setRestSeconds] = useState(DEFAULT_REST_SECONDS);
   const [restEndsAt, setRestEndsAt] = useState<number | null>(null);
   const [queuedCount, setQueuedCount] = useState(0);
+  const [exertion, setExertion] = useState(7);
+  const [sessionNote, setSessionNote] = useState("");
+  const [records, setRecords] = useState<SessionRecord[]>([]);
   const saveLock = useRef(false);
   const exercise = (exercises[exerciseIndex] ?? exercises[0])!;
 
@@ -264,7 +269,11 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
     const finishedName = workout.name;
     try {
       if (!api.isMock && sessionId) {
-        await api.completeWorkout(sessionId);
+        const result = await api.completeWorkout(sessionId, {
+          perceivedExertion: exertion,
+          notes: sessionNote,
+        });
+        setRecords(result.records);
       }
       setShowFinishConfirm(false);
       setCompletedWorkoutName(finishedName);
@@ -283,6 +292,8 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
   function restart() {
     stopRest();
     setQueuedCount(0);
+    setRecords([]);
+    setSessionNote("");
     setExerciseIndex(0);
     setSetNumber(1);
     setReps(exercises[0]?.repMax ?? 12);
@@ -561,6 +572,25 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
               <ResultMetric label="Время" value={formatElapsed(completedDurationSeconds)} />
               <ResultMetric label="Подходы" value={`${sets.length}`} />
             </Card>
+            {records.length > 0 && (
+              <Card className="border-accent/20 bg-accent/[0.07] p-5">
+                <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-[0.14em] text-accent">
+                  <Award size={14} /> Личный рекорд
+                </p>
+                <div className="mt-3 space-y-1.5">
+                  {records.map((item) => (
+                    <p key={`${item.exerciseName}-${item.kind}`} className="text-sm">
+                      <span className="font-bold">{item.exerciseName}</span>
+                      <span className="text-white/50">
+                        {item.kind === "weight"
+                          ? ` · ${item.value} кг`
+                          : ` · объём ${Math.round(item.value)} кг`}
+                      </span>
+                    </p>
+                  ))}
+                </div>
+              </Card>
+            )}
             <Card className="overflow-hidden bg-gradient-to-br from-[#1b2416] to-[#111411] p-5">
               <div className="flex items-center gap-3">
                 <div className="grid h-11 w-11 place-items-center rounded-2xl bg-accent text-ink"><Dumbbell size={21} /></div>
@@ -648,6 +678,36 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
             >
               <h2 id="finish-title" className="text-xl font-extrabold">Завершить тренировку?</h2>
               <p className="mt-2 text-sm leading-relaxed text-muted">Подходы сохранятся, цикл перейдёт к следующей тренировке, а тренеру уйдёт отчёт.</p>
+
+              <p className="mt-5 text-[10px] font-extrabold uppercase tracking-[0.14em] text-muted">
+                Насколько тяжело далось
+              </p>
+              <div className="mt-2 grid grid-cols-10 gap-1">
+                {Array.from({ length: 10 }, (_, index) => index + 1).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => { setExertion(value); haptic.select(); }}
+                    aria-label={`Сложность ${value} из 10`}
+                    aria-pressed={exertion === value}
+                    className={`h-9 rounded-lg text-[11px] font-extrabold transition ${
+                      exertion === value ? "bg-accent text-ink" : "bg-white/[0.055] text-white/45"
+                    }`}
+                  >
+                    {value}
+                  </button>
+                ))}
+              </div>
+
+              <textarea
+                value={sessionNote}
+                onChange={(event) => setSessionNote(event.target.value.slice(0, 2000))}
+                placeholder="Заметка — необязательно"
+                aria-label="Заметка к тренировке"
+                rows={2}
+                className="mt-3 w-full resize-none rounded-2xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-3 text-sm placeholder:text-white/25"
+              />
+
               {error && <p role="alert" className="mt-3 text-xs font-semibold text-red-200">{error}</p>}
               <div className="mt-5 grid grid-cols-2 gap-2">
                 <Button variant="secondary" onClick={() => setShowFinishConfirm(false)} disabled={syncing}>Продолжить</Button>
@@ -760,11 +820,18 @@ function ExerciseInfoModal({ exercise, onClose }: { exercise: Exercise; onClose:
           </div>
           <div className="mt-5 grid grid-cols-2 gap-2">
             <InfoPill label="План" value={`${exercise.targetSets}×${exercise.repMin}–${exercise.repMax}`} />
-            <InfoPill label="Вес" value={`${exercise.weightKg} кг`} />
+            <InfoPill label="Вес" value={exercise.weightKg > 0 ? `${exercise.weightKg} кг` : "Свой вес"} />
             <div className="col-span-2">
               <InfoPill label="Прошлый результат" value={exercise.lastResult} />
             </div>
           </div>
+          {exercise.catalogId ? (
+            <ExerciseTrend catalogId={exercise.catalogId} />
+          ) : (
+            <p className="mt-5 rounded-2xl bg-white/[0.035] px-4 py-3 text-center text-[11px] text-white/40">
+              История появится после первой тренировки по обновлённому плану.
+            </p>
+          )}
           <Button fullWidth className="mt-5" onClick={onClose}>Понятно</Button>
         </div>
       </motion.div>
