@@ -551,14 +551,6 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
           <motion.div key="complete" {...pageMotion} className="space-y-5 pt-6">
             <div className="relative mx-auto grid h-24 w-24 place-items-center rounded-full border border-accent/20 bg-accent/[0.08] text-accent">
               <Trophy size={42} />
-              <motion.span
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ delay: 0.3, type: "spring" }}
-                className="absolute -right-1 top-0 rounded-full bg-accent px-2 py-1 text-[10px] font-black text-ink"
-              >
-                +1 PR
-              </motion.span>
             </div>
             <div className="text-center">
               <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-accent">Тренировка завершена</p>

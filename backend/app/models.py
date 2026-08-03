@@ -108,6 +108,9 @@ class ExerciseTemplate(Base):
     # name и image_key продублированы намеренно: правка каталога не должна
     # задним числом менять уже проведённые тренировки.
     exercise_id: Mapped[int | None] = mapped_column(ForeignKey("exercises.id"))
+    # Убранное из тренировки упражнение гасится, а не удаляется: на его строку
+    # ссылаются уже записанные подходы.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     name: Mapped[str] = mapped_column(String(160))
     image_key: Mapped[str] = mapped_column(String(160))
     sort_order: Mapped[int] = mapped_column(Integer)

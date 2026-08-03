@@ -217,6 +217,7 @@ async def _workout_template_payload(
         "exercises": [
             await _exercise_payload(db, owner, exercise)
             for exercise in template.exercises
+            if exercise.is_active
         ],
     }
 
@@ -1850,36 +1851,63 @@ async def _apply_template_exercises(
     items: list[Any],
     catalog: dict[int, Exercise],
 ) -> None:
-    """Переписывает состав тренировки, подтягивая названия из каталога."""
-    # Явный запрос вместо template.exercises: у только что созданного шаблона
-    # обращение к связи вызвало бы ленивую загрузку вне async-контекста.
-    current = (
-        await db.scalars(
-            select(ExerciseTemplate).where(
-                ExerciseTemplate.workout_template_id == template.id
+    """Переписывает состав тренировки, переиспользуя уже существующие строки.
+
+    Удалять их нельзя: записанные подходы ссылаются на строку упражнения без
+    каскада, поэтому удаление либо падает на FOREIGN KEY, либо (с выключенными
+    ключами в SQLite) отдаёт переиспользованный id чужому упражнению вместе с
+    чужой историей.
+    """
+    current = list(
+        (
+            await db.scalars(
+                select(ExerciseTemplate).where(
+                    ExerciseTemplate.workout_template_id == template.id
+                )
             )
-        )
-    ).all()
-    for existing in current:
-        await db.delete(existing)
+        ).all()
+    )
+
+    # sort_order уникален в пределах тренировки — освобождаем все значения разом,
+    # иначе перестановка упирается в UNIQUE на полпути.
+    for index, row in enumerate(current):
+        row.sort_order = -(1_000 + index)
+        row.is_active = False
     await db.flush()
+
+    by_exercise = {row.exercise_id: row for row in current if row.exercise_id is not None}
+    by_name = {row.name: row for row in current if row.exercise_id is None}
 
     for order, entry in enumerate(items, start=1):
         source = catalog[entry.exercise_id]
-        db.add(
-            ExerciseTemplate(
-                workout_template_id=template.id,
-                exercise_id=source.id,
-                sort_order=order,
-                name=source.name,
-                image_key=source.image_key or "",
-                base_weight_kg=Decimal(str(entry.weight_kg)),
-                target_sets=entry.target_sets,
-                rep_min=entry.rep_min,
-                rep_max=entry.rep_max,
+        row = by_exercise.get(source.id) or by_name.get(source.name)
+        if row is None:
+            row = ExerciseTemplate(workout_template_id=template.id, sort_order=order)
+            db.add(row)
+        row.exercise_id = source.id
+        row.name = source.name
+        row.image_key = source.image_key or ""
+        row.sort_order = order
+        row.is_active = True
+        row.base_weight_kg = Decimal(str(entry.weight_kg))
+        row.target_sets = entry.target_sets
+        row.rep_min = entry.rep_min
+        row.rep_max = entry.rep_max
+    await db.flush()
+
+    # Убранные строки без истории можно смело удалить, остальные остаются
+    # погашенными и держат ссылки прошлых подходов.
+    for row in current:
+        if row.is_active:
+            continue
+        recorded = await db.scalar(
+            select(func.count(ExerciseSet.id)).where(
+                ExerciseSet.exercise_template_id == row.id
             )
         )
-
+        if not recorded:
+            await db.delete(row)
+    await db.flush()
 
 
 async def _renumber_positions(
