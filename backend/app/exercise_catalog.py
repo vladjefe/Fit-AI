@@ -5,6 +5,12 @@
 функциональная зона. Список намеренно ограничен ходовыми движениями — в
 конструкторе на телефоне листать сотни позиций невозможно.
 
+Кардио сюда не входит: оно не описывается подходами и повторами, для него есть
+отдельная запись с дистанцией и темпом.
+
+`unit` различает счётные упражнения и статические: планка меряется секундами,
+а не повторениями.
+
 `image_key` заполнен там, где есть иллюстрация в assets/exercises; для
 остальных упражнений frontend показывает заглушку по типу оборудования.
 """
@@ -14,11 +20,16 @@ from __future__ import annotations
 from typing import NamedTuple
 
 
+REPS = "reps"
+SECONDS = "seconds"
+
+
 class CatalogEntry(NamedTuple):
     name: str
     muscle_group: str
     equipment: str
     image_key: str | None
+    unit: str = REPS
 
 
 CHEST = "Грудь"
@@ -28,9 +39,8 @@ ARMS = "Руки"
 LEGS = "Ноги"
 GLUTES = "Ягодицы"
 CORE = "Пресс"
-CARDIO = "Кардио"
 
-MUSCLE_GROUPS = (CHEST, BACK, SHOULDERS, ARMS, LEGS, GLUTES, CORE, CARDIO)
+MUSCLE_GROUPS = (CHEST, BACK, SHOULDERS, ARMS, LEGS, GLUTES, CORE)
 
 BARBELL = "Штанга"
 DUMBBELL = "Гантели"
@@ -40,7 +50,6 @@ SMITH = "Смита"
 BODYWEIGHT = "Своё тело"
 KETTLEBELL = "Гиря"
 FUNCTIONAL = "Функциональное"
-CARDIO_MACHINE = "Кардио"
 
 EQUIPMENT = (
     BARBELL,
@@ -51,7 +60,6 @@ EQUIPMENT = (
     BODYWEIGHT,
     KETTLEBELL,
     FUNCTIONAL,
-    CARDIO_MACHINE,
 )
 
 CATALOG: tuple[CatalogEntry, ...] = (
@@ -125,16 +133,8 @@ CATALOG: tuple[CatalogEntry, ...] = (
     CatalogEntry("Скручивания на скамье", CORE, BODYWEIGHT, None),
     CatalogEntry("Подъём ног в висе", CORE, BODYWEIGHT, None),
     CatalogEntry("Скручивания на блоке", CORE, CABLE, None),
-    CatalogEntry("Планка", CORE, BODYWEIGHT, None),
+    CatalogEntry("Планка", CORE, BODYWEIGHT, None, SECONDS),
     CatalogEntry("Скручивания в тренажёре", CORE, MACHINE, None),
     CatalogEntry("Русский твист", CORE, FUNCTIONAL, None),
     CatalogEntry("Колесо для пресса", CORE, FUNCTIONAL, None),
-    # Кардио
-    CatalogEntry("Беговая дорожка", CARDIO, CARDIO_MACHINE, None),
-    CatalogEntry("Эллипс", CARDIO, CARDIO_MACHINE, None),
-    CatalogEntry("Велотренажёр", CARDIO, CARDIO_MACHINE, None),
-    CatalogEntry("Гребной тренажёр", CARDIO, CARDIO_MACHINE, None),
-    CatalogEntry("Лестница", CARDIO, CARDIO_MACHINE, None),
-    CatalogEntry("Скакалка", CARDIO, FUNCTIONAL, None),
-    CatalogEntry("Канаты", CARDIO, FUNCTIONAL, None),
 )

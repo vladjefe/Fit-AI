@@ -71,6 +71,8 @@ class Exercise(Base):
     name: Mapped[str] = mapped_column(String(160), index=True)
     muscle_group: Mapped[str] = mapped_column(String(40), index=True)
     equipment: Mapped[str] = mapped_column(String(40), index=True)
+    # reps или seconds: статику вроде планки нельзя считать повторениями.
+    unit: Mapped[str] = mapped_column(String(10), default="reps")
     image_key: Mapped[str | None] = mapped_column(String(160))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -112,6 +114,7 @@ class ExerciseTemplate(Base):
     # ссылаются уже записанные подходы.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     name: Mapped[str] = mapped_column(String(160))
+    unit: Mapped[str] = mapped_column(String(10), default="reps")
     image_key: Mapped[str] = mapped_column(String(160))
     sort_order: Mapped[int] = mapped_column(Integer)
     base_weight_kg: Mapped[Decimal] = mapped_column(Numeric(7, 2))

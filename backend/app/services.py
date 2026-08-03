@@ -185,6 +185,7 @@ async def _exercise_payload(
         "id": exercise.id,
         "exercise_id": exercise.exercise_id,
         "name": exercise.name,
+        "unit": exercise.unit,
         "image_key": exercise.image_key,
         "image_path": f"/assets/exercises/{exercise.image_key}.png",
         "target_sets": exercise.target_sets,
@@ -1794,6 +1795,7 @@ async def exercise_catalog(
             "name": item.name,
             "muscle_group": item.muscle_group,
             "equipment": item.equipment,
+            "unit": item.unit,
             "image_key": item.image_key,
             "is_custom": item.user_id is not None,
         }
@@ -1809,6 +1811,7 @@ async def create_custom_exercise(
         name=payload.name.strip(),
         muscle_group=payload.muscle_group,
         equipment=payload.equipment,
+        unit=payload.unit,
         image_key=None,
     )
     db.add(exercise)
@@ -1819,6 +1822,7 @@ async def create_custom_exercise(
         "name": exercise.name,
         "muscle_group": exercise.muscle_group,
         "equipment": exercise.equipment,
+        "unit": exercise.unit,
         "image_key": None,
         "is_custom": True,
     }
@@ -1889,6 +1893,7 @@ async def _apply_template_exercises(
             db.add(row)
         row.exercise_id = source.id
         row.name = source.name
+        row.unit = source.unit
         row.image_key = source.image_key or ""
         row.sort_order = order
         row.is_active = True

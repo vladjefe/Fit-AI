@@ -47,6 +47,7 @@ async def seed_exercise_catalog(db: AsyncSession) -> int:
                 name=entry.name,
                 muscle_group=entry.muscle_group,
                 equipment=entry.equipment,
+                unit=entry.unit,
                 image_key=entry.image_key,
             )
         )

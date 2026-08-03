@@ -16,7 +16,7 @@ import { ExerciseImage } from "../components/ExerciseImage";
 import { api } from "../services/api";
 import { vibrate } from "../services/native";
 import { EQUIPMENT_TYPES, MUSCLE_GROUPS } from "../types";
-import type { BuilderExercise, CatalogExercise, WorkoutPlan } from "../types";
+import type { BuilderExercise, CatalogExercise, ExerciseUnit, WorkoutPlan } from "../types";
 
 interface WorkoutBuilderProps {
   /** null — создаём новую тренировку. */
@@ -30,8 +30,9 @@ export function WorkoutBuilder({ workout, canDelete, onClose, onSaved }: Workout
   const [name, setName] = useState(workout?.name ?? "");
   const [items, setItems] = useState<BuilderExercise[]>(() =>
     (workout?.exercises ?? []).map((item) => ({
-      exerciseId: item.id,
+      exerciseId: item.catalogId ?? item.id,
       name: item.name,
+      unit: item.unit ?? "reps",
       imageKey: item.imageKey,
       muscleGroup: item.muscles,
       targetSets: item.targetSets,
@@ -76,11 +77,13 @@ export function WorkoutBuilder({ workout, canDelete, onClose, onSaved }: Workout
       {
         exerciseId: exercise.id,
         name: exercise.name,
+        unit: exercise.unit,
         imageKey: exercise.imageKey,
         muscleGroup: exercise.muscleGroup,
         targetSets: 3,
-        repMin: 8,
-        repMax: 12,
+        // Статику держат десятками секунд, повторы считают единицами.
+        repMin: exercise.unit === "seconds" ? 30 : 8,
+        repMax: exercise.unit === "seconds" ? 60 : 12,
         weightKg: 0,
       },
     ]);
@@ -283,7 +286,7 @@ function BuilderRow({
         <button type="button" onClick={() => setOpen((value) => !value)} className="min-w-0 flex-1 text-left">
           <p className="truncate text-sm font-bold">{item.name}</p>
           <p className="mt-0.5 text-[11px] text-muted">
-            {item.targetSets}×{item.repMin}–{item.repMax}
+            {item.targetSets}×{item.repMin}–{item.repMax}{item.unit === "seconds" ? " с" : ""}
             {item.weightKg > 0 ? ` · ${item.weightKg} кг` : ""}
           </p>
         </button>
@@ -406,6 +409,7 @@ function CatalogPicker({
   const [creating, setCreating] = useState(false);
   const [draftGroup, setDraftGroup] = useState<string>(MUSCLE_GROUPS[0]);
   const [draftEquipment, setDraftEquipment] = useState<string>(EQUIPMENT_TYPES[0]);
+  const [draftUnit, setDraftUnit] = useState<ExerciseUnit>("reps");
   const [savingDraft, setSavingDraft] = useState(false);
 
   async function createAndPick() {
@@ -418,6 +422,7 @@ function CatalogPicker({
         name,
         muscleGroup: draftGroup,
         equipment: draftEquipment,
+        unit: draftUnit,
       });
       setAll((current) => (current ? [...current, created] : [created]));
       onPick(created);
@@ -549,6 +554,18 @@ function CatalogPicker({
                   {item}
                 </Chip>
               ))}
+            </div>
+
+            <p className="mt-4 text-[10px] font-extrabold uppercase tracking-[0.14em] text-muted">
+              Как измеряется
+            </p>
+            <div className="mt-2 flex gap-1.5">
+              <Chip active={draftUnit === "reps"} onClick={() => setDraftUnit("reps")}>
+                Повторы
+              </Chip>
+              <Chip active={draftUnit === "seconds"} onClick={() => setDraftUnit("seconds")}>
+                Секунды
+              </Chip>
             </div>
 
             <div className="mt-5 grid grid-cols-2 gap-2">

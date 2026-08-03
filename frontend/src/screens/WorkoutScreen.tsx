@@ -81,6 +81,7 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
   const [records, setRecords] = useState<SessionRecord[]>([]);
   const saveLock = useRef(false);
   const exercise = (exercises[exerciseIndex] ?? exercises[0])!;
+  const isTimed = exercise.unit === "seconds";
 
   useEffect(() => {
     void loadRestDuration().then(setRestSeconds);
@@ -206,7 +207,7 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
     if (saveLock.current) return;
     // Вес 0 — это норма: подтягивания, отжимания, планка и прочее своим весом.
     if (reps <= 0) {
-      setError("Укажи количество повторений");
+      setError(isTimed ? "Засеки время удержания" : "Укажи количество повторений");
       return;
     }
     saveLock.current = true;
@@ -479,30 +480,42 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
                 </div>
                 <div className="text-right">
                   <p className="text-xs font-semibold text-muted">План сегодня</p>
-                  <p className="mt-2 text-lg font-extrabold">{exercise.repMin}–{exercise.repMax} повт.</p>
+                  <p className="mt-2 text-lg font-extrabold">
+                    {exercise.repMin}–{exercise.repMax} {isTimed ? "сек" : "повт."}
+                  </p>
                 </div>
               </div>
 
-              <p className="mt-6 text-xs font-semibold text-muted">Сколько повторений?</p>
-              <div className="mt-2 grid grid-cols-5 gap-2">
-                {[7, 8, 9, 10, 11, 12, 13, 14, 15].map((value) => (
-                  <motion.button
-                    whileTap={{ scale: 0.9 }}
-                    key={value}
-                    onClick={() => { setReps(value); haptic.select(); }}
-                    className={`h-11 rounded-xl text-sm font-extrabold ${reps === value ? "bg-accent text-ink" : "bg-white/[0.055] text-white/55"}`}
-                  >
-                    {value}
-                  </motion.button>
-                ))}
-                <motion.button
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => { setReps((v) => Math.max(16, v + 1)); haptic.select(); }}
-                  className={`h-11 rounded-xl text-sm font-extrabold ${reps >= 16 ? "bg-accent text-ink" : "bg-white/[0.055] text-white/55"}`}
-                >
-                  {reps >= 16 ? reps : "15+"}
-                </motion.button>
-              </div>
+              {isTimed ? (
+                <HoldStopwatch
+                  seconds={reps}
+                  onChange={setReps}
+                  onTick={haptic.select}
+                />
+              ) : (
+                <>
+                  <p className="mt-6 text-xs font-semibold text-muted">Сколько повторений?</p>
+                  <div className="mt-2 grid grid-cols-5 gap-2">
+                    {[7, 8, 9, 10, 11, 12, 13, 14, 15].map((value) => (
+                      <motion.button
+                        whileTap={{ scale: 0.9 }}
+                        key={value}
+                        onClick={() => { setReps(value); haptic.select(); }}
+                        className={`h-11 rounded-xl text-sm font-extrabold ${reps === value ? "bg-accent text-ink" : "bg-white/[0.055] text-white/55"}`}
+                      >
+                        {value}
+                      </motion.button>
+                    ))}
+                    <motion.button
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => { setReps((v) => Math.max(16, v + 1)); haptic.select(); }}
+                      className={`h-11 rounded-xl text-sm font-extrabold ${reps >= 16 ? "bg-accent text-ink" : "bg-white/[0.055] text-white/55"}`}
+                    >
+                      {reps >= 16 ? reps : "15+"}
+                    </motion.button>
+                  </div>
+                </>
+              )}
               {error && (
                 <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 px-3 py-2 text-xs font-semibold text-red-200">
                   {error}
@@ -529,7 +542,10 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
                 {currentExerciseSets.map((item) => (
                   <div key={item.setNumber} className="rounded-2xl bg-white/[0.05] p-3 text-center">
                     <p className="text-[10px] font-bold text-muted">ПОДХОД {item.setNumber}</p>
-                    <p className="mt-2 text-xl font-extrabold">{item.reps}</p>
+                    <p className="mt-2 text-xl font-extrabold">
+                      {item.reps}
+                      {isTimed && <span className="text-xs text-white/35"> с</span>}
+                    </p>
                     <p className="mt-1 text-[10px] text-white/35">
                       {item.weightKg > 0 ? `${item.weightKg} кг` : "свой вес"}
                     </p>
@@ -836,6 +852,67 @@ function ExerciseInfoModal({ exercise, onClose }: { exercise: Exercise; onClose:
         </div>
       </motion.div>
     </motion.div>
+  );
+}
+
+/** Статику держат по времени: счётчик повторов для планки бессмысленен. */
+function HoldStopwatch({
+  seconds,
+  onChange,
+  onTick,
+}: {
+  seconds: number;
+  onChange: (value: number) => void;
+  onTick: () => void;
+}) {
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (startedAt === null) return;
+    const interval = window.setInterval(() => {
+      onChange(Math.round((Date.now() - startedAt) / 1000));
+    }, 250);
+    return () => window.clearInterval(interval);
+  }, [startedAt, onChange]);
+
+  function toggle() {
+    onTick();
+    setStartedAt(startedAt === null ? Date.now() - seconds * 1000 : null);
+  }
+
+  return (
+    <div className="mt-6">
+      <p className="text-xs font-semibold text-muted">Сколько удержал</p>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onChange(Math.max(0, seconds - 5))}
+          aria-label="Минус 5 секунд"
+          className="grid h-12 w-12 place-items-center rounded-xl bg-white/[0.06]"
+        >
+          <Minus size={17} />
+        </button>
+        <span className="flex-1 text-center text-[34px] font-extrabold tabular-nums leading-none tracking-[-0.05em]">
+          {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}
+        </span>
+        <button
+          type="button"
+          onClick={() => onChange(seconds + 5)}
+          aria-label="Плюс 5 секунд"
+          className="grid h-12 w-12 place-items-center rounded-xl bg-white/[0.06]"
+        >
+          <Plus size={17} />
+        </button>
+      </div>
+      <Button
+        variant={startedAt === null ? "secondary" : "primary"}
+        fullWidth
+        className="mt-3"
+        onClick={toggle}
+      >
+        {startedAt === null ? "Засечь" : "Стоп"}
+      </Button>
+    </div>
   );
 }
 

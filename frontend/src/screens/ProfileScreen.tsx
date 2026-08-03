@@ -1,15 +1,9 @@
 import {
-  Bell,
   Clock3,
   CloudOff,
-  Dumbbell,
   HelpCircle,
-  Languages,
-  LockKeyhole,
   LogOut,
-  Moon,
   ShieldCheck,
-  SlidersHorizontal,
   Target,
   Timer,
   UserRound,
@@ -27,8 +21,9 @@ import {
   REST_PRESETS,
   saveRestDuration,
 } from "../services/restTimer";
-import type { AppTab } from "../types";
-import type { ReminderData } from "../types";
+import type { AppTab, ReminderData } from "../types";
+
+const BOT_URL = "https://t.me/vladfilaibot";
 
 export function ProfileScreen({
   userName,
@@ -131,7 +126,6 @@ export function ProfileScreen({
       )}
 
       <SettingsGroup title="Тренировки">
-        <SettingsRow icon={Dumbbell} title="Тренер" value="Не подключен" onClick={() => onToast("Тренера пока нет в настройках")} />
         <SettingsRow
           icon={Timer}
           title="Отдых между подходами"
@@ -145,17 +139,9 @@ export function ProfileScreen({
           trailing={<Toggle enabled={remindersEnabled} disabled={savingReminders || loadingReminders || !reminders.length} onChange={toggleReminders} />}
         />
         <SettingsRow icon={Target} title="Создать цель" value="Открыть" onClick={() => onNavigate("goals")} />
-        <SettingsRow icon={SlidersHorizontal} title="Единицы измерения" value="Килограммы" onClick={() => onToast("Сейчас используются килограммы")} />
-      </SettingsGroup>
-
-      <SettingsGroup title="Приложение">
-        <SettingsRow icon={Moon} title="Оформление" value="Темное" onClick={() => onToast("Темная тема уже включена")} />
-        <SettingsRow icon={Languages} title="Язык" value="Русский" onClick={() => onToast("Интерфейс сейчас на русском")} />
-        <SettingsRow icon={Bell} title="Уведомления" value={remindersEnabled ? "Включены" : "Выключены"} onClick={() => onToast("Уведомления управляются через напоминания")} />
       </SettingsGroup>
 
       <SettingsGroup title="Безопасность">
-        <SettingsRow icon={LockKeyhole} title="Данные и приватность" value="Открыть" onClick={() => onToast("Фото и AI доступны только владельцу")} />
         <SettingsRow
           icon={CloudOff}
           title="Не отправлено"
@@ -166,7 +152,12 @@ export function ProfileScreen({
             )
           }
         />
-        <SettingsRow icon={HelpCircle} title="Помощь" value="/start" onClick={() => onToast("Открой бота и нажми /start")} />
+        <SettingsRow
+          icon={HelpCircle}
+          title="Помощь в Telegram"
+          value="@vladfilaibot"
+          onClick={() => window.open(BOT_URL, "_blank", "noopener")}
+        />
         <SettingsRow
           icon={LogOut}
           title="Отвязать устройство"

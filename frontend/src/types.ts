@@ -4,6 +4,8 @@ export interface Exercise {
   id: number;
   /** id записи каталога: по нему запрашивается история. */
   catalogId?: number | null;
+  /** Статику вроде планки меряем секундами, а не повторениями. */
+  unit?: ExerciseUnit;
   name: string;
   imageKey: string;
   muscles: string;
@@ -137,11 +139,14 @@ export interface ProgressPhotoData {
   stored: boolean;
 }
 
+export type ExerciseUnit = "reps" | "seconds";
+
 export interface CatalogExercise {
   id: number;
   name: string;
   muscleGroup: string;
   equipment: string;
+  unit: ExerciseUnit;
   imageKey: string | null;
   isCustom: boolean;
 }
@@ -150,6 +155,7 @@ export interface CatalogExercise {
 export interface BuilderExercise {
   exerciseId: number;
   name: string;
+  unit: ExerciseUnit;
   imageKey: string | null;
   muscleGroup: string;
   targetSets: number;
@@ -166,7 +172,6 @@ export const MUSCLE_GROUPS = [
   "Ноги",
   "Ягодицы",
   "Пресс",
-  "Кардио",
 ] as const;
 
 export const EQUIPMENT_TYPES = [
@@ -178,7 +183,6 @@ export const EQUIPMENT_TYPES = [
   "Своё тело",
   "Гиря",
   "Функциональное",
-  "Кардио",
 ] as const;
 
 export interface ExerciseRecord {

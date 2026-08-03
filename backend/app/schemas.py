@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+from typing import Literal
 from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator
@@ -137,6 +138,7 @@ class CustomExerciseInput(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     muscle_group: str = Field(min_length=1, max_length=40)
     equipment: str = Field(min_length=1, max_length=40)
+    unit: Literal["reps", "seconds"] = "reps"
 
 
 class HealthResponse(BaseModel):

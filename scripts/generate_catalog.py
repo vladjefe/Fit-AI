@@ -30,11 +30,12 @@ export const mockCatalog: CatalogExercise[] = [
 def main() -> None:
     rows = [
         "  {{ id: {id}, name: {name}, muscleGroup: {group}, "
-        "equipment: {equipment}, imageKey: {image}, isCustom: false }},".format(
+        "equipment: {equipment}, unit: {unit}, imageKey: {image}, isCustom: false }},".format(
             id=index,
             name=json.dumps(entry.name, ensure_ascii=False),
             group=json.dumps(entry.muscle_group, ensure_ascii=False),
             equipment=json.dumps(entry.equipment, ensure_ascii=False),
+            unit=json.dumps(entry.unit, ensure_ascii=False),
             image=json.dumps(entry.image_key, ensure_ascii=False) if entry.image_key else "null",
         )
         for index, entry in enumerate(CATALOG, start=1)

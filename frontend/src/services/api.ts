@@ -14,6 +14,7 @@ import type {
   BuilderExercise,
   CatalogExercise,
   ExerciseHistory,
+  ExerciseUnit,
   DashboardData,
   GoalData,
   ProgressData,
@@ -263,6 +264,7 @@ export const api = {
     name: string;
     muscleGroup: string;
     equipment: string;
+    unit: ExerciseUnit;
   }): Promise<CatalogExercise> => {
     if (USE_MOCKS) {
       const created: CatalogExercise = {
@@ -270,6 +272,7 @@ export const api = {
         name: payload.name,
         muscleGroup: payload.muscleGroup,
         equipment: payload.equipment,
+        unit: payload.unit,
         imageKey: null,
         isCustom: true,
       };
@@ -282,6 +285,7 @@ export const api = {
         name: payload.name,
         muscle_group: payload.muscleGroup,
         equipment: payload.equipment,
+        unit: payload.unit,
       }),
     });
     return mapCatalogExercise(raw);
@@ -496,6 +500,7 @@ function mapExercise(raw: Record<string, unknown>) {
   return {
     id: toNumber(raw.id) ?? 0,
     catalogId: toNumber(raw.exercise_id) ?? null,
+    unit: (raw.unit === "seconds" ? "seconds" : "reps") as ExerciseUnit,
     name: String(raw.name ?? "Упражнение"),
     imageKey:
       String(raw.image_key ?? "") ||
@@ -700,6 +705,7 @@ function mapCatalogExercise(raw: Record<string, unknown>): CatalogExercise {
     name: String(raw.name ?? "Упражнение"),
     muscleGroup: String(raw.muscle_group ?? ""),
     equipment: String(raw.equipment ?? ""),
+    unit: (raw.unit === "seconds" ? "seconds" : "reps") as ExerciseUnit,
     imageKey: raw.image_key ? String(raw.image_key) : null,
     isCustom: Boolean(raw.is_custom),
   };
