@@ -1,4 +1,4 @@
-import { Dumbbell } from "lucide-react";
+import { Activity, Bike, Cog, Dumbbell, PersonStanding, Zap } from "lucide-react";
 import { useState } from "react";
 
 interface ExerciseImageProps {
@@ -6,15 +6,31 @@ interface ExerciseImageProps {
   alt: string;
   className?: string;
   compact?: boolean;
+  /** Иллюстрации есть не у всех упражнений — по оборудованию рисуем разные заглушки. */
+  equipment?: string;
 }
+
+const EQUIPMENT_ICONS: Record<string, typeof Dumbbell> = {
+  "Штанга": Dumbbell,
+  "Гантели": Dumbbell,
+  "Гиря": Dumbbell,
+  "Тренажёр": Cog,
+  "Смита": Cog,
+  "Блок": Activity,
+  "Своё тело": PersonStanding,
+  "Функциональное": Zap,
+  "Кардио": Bike,
+};
 
 export function ExerciseImage({
   imageKey,
   alt,
   className = "",
   compact = false,
+  equipment,
 }: ExerciseImageProps) {
   const [failed, setFailed] = useState(false);
+  const Icon = (equipment && EQUIPMENT_ICONS[equipment]) || Dumbbell;
 
   return (
     <div
@@ -36,11 +52,11 @@ export function ExerciseImage({
           <div
             className={`flex items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-accent ${compact ? "h-11 w-11" : "h-20 w-20"}`}
           >
-            <Dumbbell size={compact ? 21 : 36} strokeWidth={1.7} />
+            <Icon size={compact ? 21 : 36} strokeWidth={1.7} />
           </div>
           {!compact && (
             <span className="absolute bottom-7 text-[10px] font-bold uppercase tracking-[0.2em] text-white/25">
-              FIT AI movement
+              {equipment ?? "FIT AI movement"}
             </span>
           )}
         </div>

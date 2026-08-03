@@ -579,6 +579,7 @@ function CatalogPicker({
                 <ExerciseImage
                   imageKey={item.imageKey ?? "placeholder"}
                   alt={item.name}
+                  equipment={item.equipment}
                   compact
                   className="h-11 w-11 shrink-0 rounded-xl"
                 />

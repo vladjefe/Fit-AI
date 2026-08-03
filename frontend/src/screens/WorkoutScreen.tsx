@@ -199,8 +199,9 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
 
   async function saveCurrentSet() {
     if (saveLock.current) return;
-    if (weight <= 0 || reps <= 0) {
-      setError("Проверь вес и количество повторений");
+    // Вес 0 — это норма: подтягивания, отжимания, планка и прочее своим весом.
+    if (reps <= 0) {
+      setError("Укажи количество повторений");
       return;
     }
     saveLock.current = true;
@@ -456,7 +457,9 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
 
               <div className="mt-5 flex items-end justify-between gap-4">
                 <div>
-                  <p className="text-xs font-semibold text-muted">Вес, кг</p>
+                  <p className="text-xs font-semibold text-muted">
+                    {weight > 0 ? "Вес, кг" : "Свой вес"}
+                  </p>
                   <div className="mt-2 flex items-center gap-2">
                     <button onClick={() => setWeight((v) => Math.max(0, v - 2.5))} className="grid h-11 w-11 place-items-center rounded-xl bg-white/[0.06]"><Minus size={17} /></button>
                     <span className="min-w-[70px] text-center text-[27px] font-extrabold tracking-[-0.04em]">{weight}</span>
@@ -516,7 +519,9 @@ export function WorkoutScreen({ data, haptic, onSessionActive, onDataChanged }: 
                   <div key={item.setNumber} className="rounded-2xl bg-white/[0.05] p-3 text-center">
                     <p className="text-[10px] font-bold text-muted">ПОДХОД {item.setNumber}</p>
                     <p className="mt-2 text-xl font-extrabold">{item.reps}</p>
-                    <p className="mt-1 text-[10px] text-white/35">{item.weightKg} кг</p>
+                    <p className="mt-1 text-[10px] text-white/35">
+                      {item.weightKg > 0 ? `${item.weightKg} кг` : "свой вес"}
+                    </p>
                   </div>
                 ))}
               </div>
